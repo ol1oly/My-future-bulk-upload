@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>myFuture bulk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,500;0,600;1,500&display=swap" rel="stylesheet">
+<style>
+  :root{ --paper:#faf8f5; --ink:#191614; --crimson:#b01e2e; --line:#e3ddd3; --muted:#7c736a; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; background:var(--paper); color:var(--ink);
+        font:16px/1.6 "Segoe UI",system-ui,-apple-system,sans-serif; }
+  .page{ max-width:640px; margin:0 auto; padding:60px 24px 80px; }
+  .mark{ font:600 15px "Segoe UI",sans-serif; color:var(--crimson); }
+  h1{ font:600 clamp(32px,6.5vw,46px)/1.08 "Spectral",Georgia,serif; margin:16px 0 12px; }
+  .lede{ font-size:18px; color:#3b3630; margin:0 0 18px; }
+  .lede a{ color:var(--crimson); }
+  .drop{ margin-top:26px; border:2px dashed var(--crimson); border-radius:12px; padding:22px; background:#fff;
+         display:flex; align-items:center; gap:18px; flex-wrap:wrap; }
+  .drag{ display:inline-block; background:var(--crimson); color:#fff; text-decoration:none;
+         font:600 17px "Segoe UI",sans-serif; padding:13px 20px; border-radius:8px; white-space:nowrap;
+         box-shadow:0 6px 18px rgba(176,30,46,.28); cursor:grab; }
+  .drag:active{ cursor:grabbing; }
+  .drop p{ margin:0; font-size:14px; color:var(--muted); flex:1; min-width:180px; }
+  .copy{ margin-top:12px; background:none; border:1px solid var(--line); color:#3b3630;
+         font:14px "Segoe UI"; padding:8px 12px; border-radius:7px; cursor:pointer; }
+  .copy:hover{ border-color:var(--crimson); color:var(--crimson); }
+  ol.steps{ list-style:none; counter-reset:s; padding:0; margin:44px 0 0; }
+  ol.steps li{ counter-increment:s; position:relative; padding:0 0 22px 46px; }
+  ol.steps li::before{ content:counter(s); position:absolute; left:0; top:-2px; width:30px; height:30px;
+        border-radius:50%; background:var(--ink); color:var(--paper); font:600 15px "Spectral",serif;
+        display:flex; align-items:center; justify-content:center; }
+  ol.steps li:not(:last-child)::after{ content:""; position:absolute; left:14px; top:32px; bottom:2px;
+        width:2px; background:var(--line); }
+  ol.steps b{ font-weight:600; }
+  ol.steps a{ color:var(--crimson); }
+  code{ background:#fff; border:1px solid var(--line); border-radius:4px; padding:1px 6px; font-size:13px; }
+  h2{ font:600 16px "Segoe UI",sans-serif; margin:44px 0 10px; padding-bottom:8px; border-bottom:1px solid var(--line); }
+  .does li{ margin:6px 0; }
+  details{ margin-top:16px; border:1px solid var(--line); border-radius:8px; background:#fff; padding:12px 16px; }
+  summary{ cursor:pointer; font-weight:600; font-size:14px; }
+  textarea{ width:100%; height:120px; margin-top:10px; font:12px/1.5 Consolas,monospace; border:1px solid var(--line);
+            border-radius:6px; padding:10px; resize:vertical; }
+</style>
+</head>
+<body>
+<main class="page">
+  <div class="mark">McGill myFuture</div>
+  <h1>myFuture bulk upload</h1>
+  <p class="lede">A bookmark that uploads your CVs, transcript and cover letters, builds an application package for
+  each CV, and removes the old dated copies. It runs on your
+  <a href="https://myfuture.mcgill.ca/myAccount/opportunities/documents.htm">myFuture documents page</a>.</p>
+
+  <div class="drop">
+    <a class="drag" id="bm" href="https://myfuture.mcgill.ca/myAccount/opportunities/documents.htm">myFuture bulk</a>
+    <p>Drag this to your bookmarks bar. It does nothing until you click it on the documents page.</p>
+  </div>
+  <button class="copy" id="copy">Can’t drag it? Copy the bookmark address</button>
+
+  <ol class="steps">
+    <li><b>Add the bookmark.</b> Drag the red button up to your bookmarks bar (show it with <code>Ctrl</code>+<code>Shift</code>+<code>B</code>).</li>
+    <li><b>Open the documents page.</b> Sign in to myFuture and go to <a href="https://myfuture.mcgill.ca/myAccount/opportunities/documents.htm">your documents</a> (Jobs, Internships &amp; Volunteering &rsaquo; Documents).</li>
+    <li><b>Click the bookmark.</b> A panel opens in the corner with your current documents already loaded. Choose what to upload, press <b>Preview</b>, then <b>Apply</b>.</li>
+  </ol>
+
+  <h2>What it does</h2>
+  <ul class="does">
+    <li>Uploads the CVs, transcript and cover letters you choose, dating each name.</li>
+    <li>Builds one application package per CV. You can reuse CVs or a transcript already on myFuture instead of uploading new ones.</li>
+    <li>Deletes the older dated copies it uploaded before. It leaves cover letters alone, and skips anything attached to a job you already applied to.</li>
+  </ul>
+
+  <details>
+    <summary>No bookmarks bar? Paste it into the console instead</summary>
+    <p style="font-size:13px;color:var(--muted);margin:10px 0 0">On the documents page, press <code>F12</code>, open Console, paste this and press Enter.</p>
+    <textarea id="src" readonly spellcheck="false"></textarea>
+  </details>
+
+  <footer style="margin-top:48px;padding-top:16px;border-top:1px solid var(--line);font-size:13px;color:var(--muted)">
+    Created by <a href="https://github.com/ol1oly" style="color:var(--crimson)">Olivier Girardville</a> in 2026
+  </footer>
+</main>
+
+<script>
+  var code = new TextDecoder().decode(Uint8Array.from(atob("__BUNDLE_B64__"), function(c){ return c.charCodeAt(0); }));
+  var url = "javascript:" + code;
+  document.getElementById("bm").href = url;
+  document.getElementById("src").value = code;
+  document.getElementById("copy").addEventListener("click", function(){
+    var btn = this;
+    navigator.clipboard.writeText(url).then(function(){ btn.textContent = "Copied. Make a new bookmark and paste it as the URL."; },
+      function(){ btn.textContent = "Copy failed. Use the console option below."; });
+  });
+</script>
+</body>
+</html>
