@@ -4,4 +4,4 @@ Refresh your job-search documents on McGill **myFuture**: upload CVs, a transcri
 cover letters, rebuild one application package per CV, and delete the older dated copies.
 
 ## Safety
-Only PDFs upload. Other formats are ignored.
+Only PDFs upload
