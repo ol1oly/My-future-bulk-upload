@@ -59,15 +59,27 @@ Read only when the fast path in SKILL.md fails.
 
 ## Bookmarklet panel (`ui/`)
 - `panel.src.js` is the source; `build.py` strips comments (string/regex-aware, gated by `node --check`), injects the
-  three scripts as JSON string literals, and writes `panel.bundle.js` + `install.html` (bundle embedded as base64,
-  decoded in-page with TextDecoder). Keep `panel.src.js` ASCII-only — the bookmarklet loses non-ASCII bytes (mojibake).
+  three scripts as JSON string literals and the version from `VERSION`, escapes every non-ASCII character as a JS
+  unicode escape (the bookmarklet loses raw non-ASCII bytes), and writes `panel.bundle.js` + `install.html` (bundle
+  embedded as base64, decoded in-page with TextDecoder). Non-ASCII may appear only inside string literals.
 - The panel runs every myFuture page in ONE hidden same-origin iframe, so it never navigates the top page away.
-- On open it reads the existing CV / transcript / package lists (`listDocs`) and shows CVs as checkboxes and the
-  transcript as a select (existing ones + "upload new"). So packages can reuse documents already on myFuture:
-  upload only a transcript to re-pair it with the current CVs, or only CVs to pair them with the current transcript.
-- Preview is pure (no network writes) — it prints the plan from the already-loaded lists. Apply does upload -> create
-  packages -> delete old, verifying counts. Package names always take today's date, referencing the CV doc by its real
-  name, so old dated packages delete cleanly without name clashes.
+- On open it reads the CV / transcript / cover letter / package lists (`listDocs`, skipped when the overview count is 0).
+  CVs are grouped by base name (date suffix stripped); a group's package uses its newest copy unless a new file replaces it.
+- Screens: Choose -> Review -> Run -> result. Choose has one drop zone (type guessed from the file name, editable) and a
+  "Clean up only" mode (keep the newest dated copy per base name, remove the older dated ones). Each cover letter is
+  upload-only, joins one CV's package, or gets its own package (named after the cover letter) with a chosen CV.
+- Names already on myFuture get `_2`, `_3`... (`DATE_RE` accepts that suffix). Only dated names are ever deleted, and
+  nothing a package in this run uses.
+- "Check with myFuture" = dry run: upload.js temp uploads (nothing saved), package-form dropdowns read to confirm each
+  referenced name exists exactly once, delete.js `dryRun` per category. No writes.
+- Apply runs uploads -> packages -> deletes (packages first) -> re-reads the lists. Progress is kept per item (deletes
+  keyed `category:name`, since a CV and its package share a name), so "Retry remaining steps" skips finished work.
+  Deletes run only after every upload and package succeeded.
+- Choices (mode, toggles, unticked CVs, cover letter pairings by base name, language, panel position) persist in
+  myFuture's `localStorage` under `mfBulk.prefs`. The panel fetches `VERSION` from the GitHub repo and shows a notice
+  when a newer one exists; the install page does the same for itself.
+- Tested end to end against a fake stateful myFuture served through Playwright routes (upload, packages, deletes,
+  in-use refusal, retry after a failed package) — not yet against the live site.
 - Off myFuture, or if reading fails, the panel shows a link to the documents page instead of acting.
 
 ## Playwright runner (`scripts/myfuture_playwright.py`)

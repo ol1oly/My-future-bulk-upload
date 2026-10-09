@@ -41,6 +41,10 @@
   .does li{ margin:6px 0; }
   details{ margin-top:16px; border:1px solid var(--line); border-radius:8px; background:#fff; padding:12px 16px; }
   summary{ cursor:pointer; font-weight:600; font-size:14px; }
+  .ver{ margin-top:14px; font-size:14px; color:var(--muted); }
+  .ver b{ color:var(--ink); }
+  .newer{ margin-top:10px; background:#fbf1dc; color:#6b4600; border-radius:8px; padding:10px 14px; font-size:14px; }
+  .newer a{ color:#6b4600; font-weight:600; }
   textarea{ width:100%; height:120px; margin-top:10px; font:12px/1.5 Consolas,monospace; border:1px solid var(--line);
             border-radius:6px; padding:10px; resize:vertical; }
 </style>
@@ -58,18 +62,23 @@
     <p>Drag this to your bookmarks bar. It does nothing until you click it on the documents page.</p>
   </div>
   <button class="copy" id="copy">Can’t drag it? Copy the bookmark address</button>
+  <p class="ver">This page installs <b>version __VERSION__</b>. Already have the bookmark? Its panel shows the version
+  next to the title. If that number is lower, delete the old bookmark and drag this one up again.</p>
+  <p class="newer" id="newer" hidden></p>
 
   <ol class="steps">
     <li><b>Add the bookmark.</b> Drag the red button up to your bookmarks bar (show it with <code>Ctrl</code>+<code>Shift</code>+<code>B</code>).</li>
     <li><b>Open the documents page.</b> Sign in to myFuture and go to <a href="https://myfuture.mcgill.ca/myAccount/opportunities/documents.htm">your documents</a> (Jobs, Internships &amp; Volunteering &rsaquo; Documents).</li>
-    <li><b>Click the bookmark.</b> A panel opens in the corner with your current documents already loaded. Choose what to upload, press <b>Preview</b>, then <b>Apply</b>.</li>
+    <li><b>Click the bookmark.</b> A panel opens in the corner with your current documents already loaded. Drop in your PDFs, press <b>Review changes</b> to see exactly what will be uploaded, built and removed,
+    optionally <b>Check with myFuture</b> (a test run that saves nothing), then <b>Apply</b>.</li>
   </ol>
 
   <h2>What it does</h2>
   <ul class="does">
-    <li>Uploads the CVs, transcript and cover letters you choose, dating each name.</li>
-    <li>Builds one application package per CV. You can reuse CVs or a transcript already on myFuture instead of uploading new ones.</li>
-    <li>Deletes the older dated copies it uploaded before. It leaves cover letters alone, and skips anything attached to a job you already applied to.</li>
+    <li>Uploads the CVs, transcript and cover letters you drop in, dating each name. A name already on myFuture gets <code>_2</code> instead of clashing.</li>
+    <li>Builds one application package per CV. Each cover letter can join a CV’s package, get its own package, or just upload. CVs and a transcript already on myFuture can be reused.</li>
+    <li>Removes older dated copies once everything else worked, or only cleans up with <b>Clean up only</b>. Names without a date and anything attached to a job you applied to are never removed.</li>
+    <li>Remembers your choices for next time, works in English or French, and can be dragged or minimised out of the way.</li>
   </ul>
 
   <details>
@@ -84,6 +93,18 @@
 </main>
 
 <script>
+  var VERSION = "__VERSION__";
+  fetch("https://raw.githubusercontent.com/ol1oly/My-future-bulk-upload/main/VERSION", { cache: "no-store" })
+    .then(function (r) { return r.ok ? r.text() : ""; })
+    .then(function (v) {
+      v = v.trim();
+      var a = v.split(".").map(Number), b = VERSION.split(".").map(Number), newer = false;
+      for (var i = 0; i < 3; i++) { if (a[i] !== b[i]) { newer = a[i] > b[i]; break; } }
+      if (!/^\d+\.\d+\.\d+$/.test(v) || !newer) return;
+      var el = document.getElementById("newer");
+      el.innerHTML = "Version " + v + " is out and this page is older. <a href=\"https://github.com/ol1oly/My-future-bulk-upload\">Download the latest install page</a>.";
+      el.hidden = false;
+    }, function () {});
   var code = new TextDecoder().decode(Uint8Array.from(atob("__BUNDLE_B64__"), function(c){ return c.charCodeAt(0); }));
   var url = "javascript:" + code;
   document.getElementById("bm").href = url;

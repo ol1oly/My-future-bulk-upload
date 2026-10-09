@@ -2,8 +2,9 @@
 """Assemble the bookmarklet from the shared scripts + panel source.
 
 Strips comments (the bookmarklet is meant to be pasted, so it stays comment-free), injects the three
-operation scripts into the panel as JSON string literals, and writes panel.bundle.js and install.html.
-Run after changing a script or the panel.
+operation scripts into the panel as JSON string literals and the version from ../VERSION, escapes every
+non-ASCII character as a JS unicode escape (a bookmarklet loses raw non-ASCII bytes), and writes panel.bundle.js and
+install.html. Run after changing a script, the panel or VERSION.
 """
 
 import base64
@@ -15,6 +16,7 @@ from pathlib import Path
 
 UI = Path(__file__).resolve().parent
 SCRIPTS = UI.parent / "scripts"
+VERSION = (UI.parent / "VERSION").read_text(encoding="utf-8").strip()
 
 
 def strip_comments(js):
@@ -73,6 +75,18 @@ def strip_comments(js):
     return "\n".join(ln for ln in lines if ln.strip()) + "\n"
 
 
+def ascii_only(js):
+    # Non-ASCII only appears inside string literals, where a \uXXXX escape (UTF-16 units) means the same thing.
+    out = []
+    for ch in js:
+        if ord(ch) < 128:
+            out.append(ch)
+        else:
+            units = ch.encode("utf-16-be")
+            out.extend("\\u%02x%02x" % (units[i], units[i + 1]) for i in range(0, len(units), 2))
+    return "".join(out)
+
+
 def check(js, label):
     with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as fh:
         fh.write(js); path = fh.name
@@ -88,6 +102,7 @@ def build_bundle():
         src = strip_comments((SCRIPTS / name).read_text(encoding="utf-8"))
         check(src, name)
         panel = panel.replace(token, json.dumps(src))
+    panel = ascii_only(panel.replace("__VERSION__", VERSION))
     check(panel, "panel bundle")
     return panel
 
@@ -96,9 +111,9 @@ def main():
     bundle = build_bundle()
     (UI / "panel.bundle.js").write_text(bundle, encoding="utf-8")
     b64 = base64.b64encode(bundle.encode("utf-8")).decode("ascii")
-    html = (UI / "install.template.html").read_text(encoding="utf-8").replace("__BUNDLE_B64__", b64)
+    html = (UI / "install.template.html").read_text(encoding="utf-8").replace("__BUNDLE_B64__", b64).replace("__VERSION__", VERSION)
     (UI / "install.html").write_text(html, encoding="utf-8")
-    print(f"panel.bundle.js: {len(bundle)} chars (comment-free); install.html: {len(html)} chars")
+    print(f"v{VERSION} panel.bundle.js: {len(bundle)} chars (comment-free); install.html: {len(html)} chars")
 
 
 if __name__ == "__main__":

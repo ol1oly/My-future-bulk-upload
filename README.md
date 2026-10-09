@@ -18,7 +18,11 @@ automation (`pip install playwright` then `python -m playwright install chromium
 
 The panel loads your current documents first, so you can build packages from CVs or a transcript already on
 myFuture: upload only a transcript to re-pair it with your current CVs, or only new CVs to pair them with your
-current transcript. Each cover letter you add gets a menu to choose which package it belongs to.
+current transcript. Drop all your PDFs in one place; each cover letter can join a CV's package, get its own package,
+or just be uploaded. **Review changes** shows what will be added and removed, **Check with myFuture** tests the run
+without saving anything, and if a run stops halfway, **Retry remaining steps** picks up where it left off.
+**Clean up only** removes older dated copies without uploading. The panel speaks English and French, remembers your
+choices, can be dragged or minimised, and tells you when a newer version is out (bump `VERSION`, rebuild, push).
 
 ## Setup
 
@@ -37,5 +41,6 @@ entry picks the most recent file in a folder (handy for a transcript you re-down
 
 ## Safety
 
-Preview (dry run) first — it changes nothing. Real runs ask before deleting. Only PDFs upload; other formats
-are ignored.
+Check with myFuture (dry run) first — it changes nothing. Real runs ask before applying, and only remove old
+copies once every upload and package succeeded. Only names ending in a date are ever removed. Only PDFs upload;
+other files are refused with a message.
