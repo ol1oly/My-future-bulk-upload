@@ -415,8 +415,15 @@
       await w.__orbisBoard.listAll();
       const p = w.JobTools.parsePosting(await w.__orbisBoard.fetchDetail(String(id)));
       return JSON.parse(JSON.stringify({ title: p.fields.title || "", organization: p.fields.organization || "", description: p.fields.description || "",
-        qualifications: p.fields.qualifications || "", template: p.coverLetter.template, salutation: p.coverLetter.slots.SALUTATION, cv: p.cv }));
+        qualifications: p.fields.qualifications || "", template: p.coverLetter.template, salutation: p.coverLetter.slots.SALUTATION, cv: p.cv,
+        language: p.language, track: p.track.track, matched: p.track.matched, documents: p.documents }));
     }, [BOARDS[item.board || "internshipscoop"], engine, item.postingId]);
+  }
+
+  // What this posting calls for: suggested CV (language × track, with the keywords that decided it) and documents.
+  async function recommend(tabId, item) {
+    const d = await postingDetails(tabId, item);
+    return { cv: d.cv, language: d.language, track: d.track, matched: d.matched, documents: d.documents };
   }
 
   // Claude (on this computer, through the bridge, with no tools) writes the one posting-specific sentence.
@@ -526,7 +533,8 @@
       BRIDGE_REQUEST_PREP: () => requestPrep(message.item),
       BRIDGE_FORGET: () => forget(String(message.postingId)),
       BRIDGE_PREPARE_ONE: () => prepareOne(message.tabId, message.item, message.choice),
-      BRIDGE_DRAFT_LETTER: () => draftLetter(message.tabId, message.item)
+      BRIDGE_DRAFT_LETTER: () => draftLetter(message.tabId, message.item),
+      BRIDGE_RECOMMEND: () => recommend(message.tabId, message.item)
     };
     const job = jobs[message?.type];
     if (!job) return undefined;

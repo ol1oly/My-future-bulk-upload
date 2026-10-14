@@ -267,3 +267,4 @@ button.small { width: auto; margin: 0; padding: 4px 9px; font-size: 11px; }
 .apps-note:empty { display: none; }
 .prepare textarea { width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; font: inherit; font-size: 12px; resize: vertical; }
 .prepare small { color: var(--muted); font-size: 10.5px; }
+.prepare .recommend { color: var(--ink); font-size: 11px; line-height: 1.35; }
