@@ -331,7 +331,10 @@
       counts[board] = await inPage(tabId, (path) => window.__mfFrame.boardCounts(path), [BOARDS[board]]);
       for (const row of await loadBoardIntoFrame(tabId, board, engine)) snapshot[row.id] = { ...row, board };
     }
-    await chrome.storage.local.set({ [BOARD_KEY]: snapshot, mfCounts: counts, mfSyncedAt: new Date().toISOString() });
+    // The myFuture shortlist is the source of truth: anything on it is shown again even if it was hidden earlier.
+    const { [HIDDEN_KEY]: hiddenBefore = [] } = await chrome.storage.local.get({ [HIDDEN_KEY]: [] });
+    const hidden = hiddenBefore.filter((id) => !snapshot[id]?.shortlisted);
+    await chrome.storage.local.set({ [BOARD_KEY]: snapshot, mfCounts: counts, mfSyncedAt: new Date().toISOString(), [HIDDEN_KEY]: hidden });
     note(tabId, "Checking your cover letters and packages…");
     const [letterDocs, packageDocs] = await inPage(tabId, async () => [
       await window.__mfFrame.listDocs("Cover Letter"), await window.__mfFrame.listDocs("Application Packages")]);
@@ -500,7 +503,14 @@
     delete jobTracker[`p${postingId}`];
     await chrome.storage.local.set({ [HIDDEN_KEY]: hidden, jobTracker });
     await updateApps((s) => { delete s[postingId]; });
-    return { message: "Removed from My postings." };
+    return { message: "Hidden from My postings." };
+  }
+
+  async function unhideAll() {
+    const { [HIDDEN_KEY]: hidden = [] } = await chrome.storage.local.get({ [HIDDEN_KEY]: [] });
+    await chrome.storage.local.set({ [HIDDEN_KEY]: [] });
+    chrome.runtime.sendMessage({ type: "BRIDGE_APPS" }).catch(() => {});
+    return { message: `${hidden.length} hidden posting(s) shown again. Press Sync to refresh them.` };
   }
 
   async function status() {
@@ -515,6 +525,7 @@
   }
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    const _sender = sender;
     if (message?.type === "APPLY_CONTEXT") {
       applyTabs().then((tabs) => sendResponse(sender.tab ? tabs[sender.tab.id] || null : null));
       return true;
@@ -532,6 +543,8 @@
       BRIDGE_OPEN_POSTING: () => openPostingTab(message.item),
       BRIDGE_REQUEST_PREP: () => requestPrep(message.item),
       BRIDGE_FORGET: () => forget(String(message.postingId)),
+      BRIDGE_UNHIDE: () => unhideAll(),
+      APPLY_DONE: () => setApplyTab(_sender?.tab?.id ?? message.tabId, null).then(() => ({})),
       BRIDGE_PREPARE_ONE: () => prepareOne(message.tabId, message.item, message.choice),
       BRIDGE_DRAFT_LETTER: () => draftLetter(message.tabId, message.item),
       BRIDGE_RECOMMEND: () => recommend(message.tabId, message.item)

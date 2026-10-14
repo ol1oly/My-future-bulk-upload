@@ -51,7 +51,7 @@
     const render = () => {
       if (!picked) picked = preselect(context.package); // select once; never override the student's own choice later
       const what = context.title ? `Applying to ${context.title}${context.organization ? ` — ${context.organization}` : ""}. ` : "";
-      text.textContent = context.package
+      text.textContent = context.done ? `${what}Submitted ✓ — press Sync in the extension to update My postings.` : context.package
         ? picked
           ? `${what}Package “${context.package}” is selected for you. Review, then submit.`
           : `${what}Choose the package “${context.package}” when myFuture asks for documents, then submit.`
@@ -63,7 +63,28 @@
     const timer = setInterval(() => { tries += 1; render(); if (tries > 10) clearInterval(timer); }, 700);
   }
 
+  // Only pages of THIS posting's application get the banner; anything else means the student moved on.
+  function belongsTo(context) {
+    if (document.querySelector("#postingsTable")) return false; // a postings list lists every posting
+    const text = norm(document.body?.innerText || "");
+    const id = String(context.postingId || "");
+    const idOnPage = id && (text.includes(id) || [...document.querySelectorAll("input[type=hidden]")].some((i) => i.value === id));
+    const title = norm(context.title).slice(0, 40);
+    return Boolean(idOnPage || (title.length > 8 && text.includes(title)));
+  }
+
+  function submitted() {
+    return /application (has been )?submitted|successfully submitted|candidature (a été )?soumise/i.test(document.body?.innerText || "");
+  }
+
   chrome.runtime.sendMessage({ type: "APPLY_CONTEXT" }).then((context) => {
-    if (context?.postingId) show(context);
+    if (!context?.postingId) return;
+    if (!belongsTo(context)) { chrome.runtime.sendMessage({ type: "APPLY_DONE" }).catch(() => {}); return; }
+    if (submitted()) {
+      show({ ...context, package: "", done: true });
+      chrome.runtime.sendMessage({ type: "APPLY_DONE" }).catch(() => {});
+      return;
+    }
+    show(context);
   }).catch(() => {});
 })();

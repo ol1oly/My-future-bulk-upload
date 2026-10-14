@@ -12,7 +12,7 @@
   const FILTERS = [["active", "Active"], ["prepare", "No package yet"], ["ready", "Package ready"], ["submitted", "Submitted"], ["shortlist", "★ Shortlist"]];
   const STAGE_LABEL = { submitted: "Submitted", started: "Started", ready: "Package ready", prepare: "No package yet" };
   let tab = null, onMyFuture = false, bridge = null;
-  let filter = "active", items = [], docs = null, counts = {}, openPrepare = "", armedUntil = 0;
+  let filter = "active", items = [], docs = null, counts = {}, openPrepare = "", armedUntil = 0, hiddenCount = 0;
 
   const el = (tag, props = {}, ...children) => {
     const node = Object.assign(document.createElement(tag), props);
@@ -31,6 +31,7 @@
     const data = await chrome.storage.local.get({ mstApps: {}, jobTracker: {}, mfBoard: {}, mstHidden: [], mfDocs: null, mfSyncedAt: "", mfCounts: {} });
     docs = data.mfDocs;
     counts = data.mfCounts;
+    hiddenCount = data.mstHidden.length;
     const byId = new Map();
     const get = (id) => { if (!byId.has(id)) byId.set(id, { postingId: id }); return byId.get(id); };
     for (const row of Object.values(data.mfBoard)) {
@@ -75,9 +76,13 @@
     }));
     const totalShortlist = Object.values(counts || {}).reduce((sum, c) => sum + (c?.shortlist || 0), 0);
     const openShortlist = items.filter((i) => i.shortlisted).length;
-    noteEl.textContent = totalShortlist > openShortlist
-      ? `Your myFuture shortlist has ${totalShortlist} postings; ${totalShortlist - openShortlist} of them are closed (deadline passed), so they're not listed here.`
-      : "";
+    noteEl.replaceChildren(totalShortlist > openShortlist
+      ? `Your myFuture shortlist has ${totalShortlist} postings; ${totalShortlist - openShortlist} of them are closed (deadline passed), so they're not listed here. ` : "");
+    if (hiddenCount) {
+      const unhide = el("button", { type: "button", className: "link", textContent: `Show hidden (${hiddenCount})` });
+      unhide.addEventListener("click", () => run(unhide, { type: "BRIDGE_UNHIDE" }, "…"));
+      noteEl.append(unhide);
+    }
     const ready = n.ready;
     applyAllBtn.textContent = Date.now() < armedUntil ? `Click again to open ${ready} form(s)` : `Apply to all with a package (${ready})`;
     const shown = items.filter((i) => matches(i, filter));
@@ -109,7 +114,8 @@
         item.shortlisted ? "Remove from your myFuture shortlist" : "Add to your myFuture shortlist", true);
     }
     act("Open", "link", (b) => run(b, { type: "BRIDGE_OPEN_POSTING", item: ref }, "Opening…"), "Open the posting in a new tab");
-    act("Remove", "link", (b) => run(b, { type: "BRIDGE_FORGET", postingId: item.postingId }, "Removing…"), "Hide from this list (doesn't change myFuture)");
+    // Shortlisted postings leave the list with ★ (unshortlist on myFuture), so the list and myFuture never disagree.
+    if (!item.shortlisted) act("Hide", "link", (b) => run(b, { type: "BRIDGE_FORGET", postingId: item.postingId }, "Hiding…"), "Hide from this list (doesn't change myFuture)");
 
     const chips = el("div", { className: "steps" },
       chip(STAGE_LABEL[item.stage], { submitted: "ok", ready: "ok", started: "warn" }[item.stage] || ""),
