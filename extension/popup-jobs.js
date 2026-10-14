@@ -3,7 +3,7 @@
 
   const APPLICANT_KEY = "applicantName";
   const TRACKER_KEY = "jobTracker";
-  const STATUSES = ["saved", "drafted", "applied", "interview", "offer", "rejected", "skipped"];
+  const STATUSES = ["saved", "prepared", "applied", "interview", "offer", "rejected", "skipped"];
   const CVS = ["en_normal", "en_fullstack", "en_games", "fr_normal", "fr_fullstack", "fr_games"];
 
   const panel = document.querySelector("#jobPanel");
@@ -24,9 +24,27 @@
     return saved[TRACKER_KEY];
   }
 
+  // Applications prepared through the local bridge (stored by bridge.js) also belong in this list.
+  async function loadAll() {
+    const tracker = await loadTracker();
+    const { mstApps = {} } = await chrome.storage.local.get({ mstApps: {} });
+    const merged = { ...tracker };
+    for (const app of Object.values(mstApps)) {
+      const id = `p${app.postingId}`;
+      if (merged[id]) continue;
+      merged[id] = { id, title: app.title, organization: app.organization, deadline: app.deadline || "", method: "myfuture",
+        cv: app.cvUsed || "", status: app.applied ? "applied" : app.packageStatus === "done" ? "prepared" : "saved", fromPlan: true };
+    }
+    return merged;
+  }
+
+  async function updateCount() {
+    trackerButton.textContent = `Saved postings (${Object.keys(await loadAll()).length})`;
+  }
+
   async function saveTracker(tracker) {
     await chrome.storage.local.set({ [TRACKER_KEY]: tracker });
-    trackerButton.textContent = `Saved postings (${Object.keys(tracker).length})`;
+    await updateCount();
   }
 
   async function downloadText(content, filename, mime) {
@@ -71,7 +89,7 @@
     const cvSelect = el("select", { id: "jobCv", title: `Matched: ${parsed.track.matched.join(", ") || "nothing specific"}` },
       ...CVS.map((name) => el("option", { value: name, textContent: name + (name === parsed.cv ? " (suggested)" : ""), selected: name === parsed.cv })));
     const save = el("button", { type: "button", textContent: "Save job card" });
-    save.addEventListener("click", () => saveCard(parsed, cvSelect.value, parsed.documents.coverLetter ? "saved" : "drafted", save));
+    save.addEventListener("click", () => saveCard(parsed, cvSelect.value, parsed.documents.coverLetter ? "saved" : "prepared", save));
 
     const actions = el("div", { className: "job-actions" }, save);
     if (parsed.apply.method === "myfuture" && currentTab) {
@@ -116,7 +134,7 @@
   }
 
   async function renderTracker() {
-    const tracker = await loadTracker();
+    const tracker = await loadAll();
     const rows = Object.values(tracker).sort((a, b) => (a.deadline || "9999").localeCompare(b.deadline || "9999"));
     const { [APPLICANT_KEY]: applicant = "" } = await chrome.storage.local.get(APPLICANT_KEY);
     const name = el("input", { id: "applicantName", value: applicant, placeholder: "Your name (for email drafts)" });
@@ -126,7 +144,7 @@
       const status = el("select", { "aria-label": `Status for ${row.title}` }, ...STATUSES.map((value) => el("option", { value, textContent: value, selected: value === row.status })));
       status.addEventListener("change", async () => {
         const latest = await loadTracker();
-        latest[row.id] = { ...latest[row.id], status: status.value, appliedAt: status.value === "applied" && !row.appliedAt ? new Date().toISOString().slice(0, 10) : latest[row.id].appliedAt };
+        latest[row.id] = { ...row, ...latest[row.id], fromPlan: undefined, status: status.value, appliedAt: status.value === "applied" && !row.appliedAt ? new Date().toISOString().slice(0, 10) : latest[row.id].appliedAt };
         await saveTracker(latest);
       });
       const remove = el("button", { type: "button", className: "link", textContent: "Remove", title: "Remove from tracker" });
@@ -174,7 +192,7 @@
     trackerPanel.hidden = !trackerPanel.hidden;
     if (!trackerPanel.hidden) await renderTracker();
   });
-  loadTracker().then((tracker) => { trackerButton.textContent = `Saved postings (${Object.keys(tracker).length})`; });
+  updateCount();
 
   globalThis.JobPanel = { scan, get current() { return current; } };
 })();

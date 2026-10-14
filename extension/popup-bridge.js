@@ -10,6 +10,7 @@
   const buttons = { check: $("#bridgeCheck"), run: $("#bridgeRun"), applyAll: $("#bridgeApplyAll"), refresh: $("#bridgeRefresh"), coop: $("#bridgeScanCoop"), career: $("#bridgeScanCareer") };
   let tab = null;
   let readyCount = 0;
+  let plannedOpen = 0;
   let armedUntil = 0; // "Apply to all" needs a second click within 5 s
 
   const el = (tag, props = {}, ...children) => {
@@ -36,7 +37,7 @@
     const applied = rows.filter((a) => a.applied).length;
     summary.textContent = rows.length ? `${rows.length} · ${readyCount} ready · ${applied} applied` : "";
     applyAllLabel();
-    buttons.applyAll.disabled = !readyCount;
+    plannedOpen = rows.filter((a) => !a.applied).length;
     list.replaceChildren(...rows.map((app) => {
       const open = el("button", { type: "button", className: "link", textContent: "Open form", title: "Open myFuture's application form for this posting in a new tab" });
       open.addEventListener("click", () => job(open, { type: "BRIDGE_OPEN_FORMS", postingIds: [app.postingId] }, "Opening…"));
@@ -62,16 +63,16 @@
       const r = step.result || {};
       if (step.step === "resolve") out.push(`Found ${r.cvs} CV(s) and ${r.transcripts} transcript(s) on myFuture.`);
       if (step.step === "upload") {
-        if (log.dryRun) out.push(r.dryRun ? "The cover letters can be uploaded." : "The cover letters could not be checked.");
-        else {
-          const saved = (r.results || []).filter((x) => x.status === "saved").length;
-          out.push(`${saved}/${(r.results || []).length} cover letter(s) uploaded.`);
+        if (r.alreadyThere?.length) out.push(`${r.alreadyThere.length} cover letter(s) were already on myFuture.`);
+        if (r.results?.length || r.dryRun) {
+          if (log.dryRun) out.push(r.dryRun ? "The new cover letters can be uploaded." : "The cover letters could not be checked.");
+          else out.push(`${r.results.filter((x) => x.status === "saved").length}/${r.results.length} cover letter(s) uploaded.`);
         }
       }
       if (step.step === "packages") {
-        if (r.alreadyExist?.length) out.push(`${r.alreadyExist.length} package(s) already existed and were kept.`);
-        if (log.dryRun) out.push(r.dryRun ? `${(r.packages || []).length} package(s) can be created.` : "The packages could not be checked.");
-        else if (r.results) out.push(`${r.results.filter((x) => x.status === "created").length}/${r.results.length} package(s) created.`);
+        if (r.alreadyExist?.length) out.push(`${r.alreadyExist.length} package(s) were already on myFuture.`);
+        if (log.dryRun && r.dryRun) out.push(`${(r.packages || []).length} new package(s) can be created.`);
+        else if (r.results?.length) out.push(`${r.results.filter((x) => x.status === "created").length}/${r.results.length} new package(s) created.`);
       }
       if (step.step === "probe") out.push("Saved one application form so the submit step can be automated next.");
     }
@@ -140,6 +141,13 @@
     buttons.check.addEventListener("click", () => job(buttons.check, { type: "BRIDGE_CHECK_PLAN" }, "Checking…"));
     buttons.run.addEventListener("click", () => job(buttons.run, { type: "BRIDGE_RUN_PLAN" }, "Preparing…"));
     buttons.applyAll.addEventListener("click", () => {
+      if (!readyCount) {
+        progressLine.className = "apps-progress bad";
+        progressLine.textContent = plannedOpen
+          ? "Nothing is ready yet: press 2 · Prepare first (or Refresh status if you already prepared)."
+          : "Every planned application is already submitted.";
+        return;
+      }
       if (Date.now() > armedUntil) { armedUntil = Date.now() + 5000; applyAllLabel(); setTimeout(applyAllLabel, 5100); return; }
       armedUntil = 0;
       job(buttons.applyAll, { type: "BRIDGE_OPEN_FORMS" }, "Opening forms…");

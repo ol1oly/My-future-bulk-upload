@@ -124,7 +124,15 @@
       log.steps.push({ step: "resolve", result: { cvs: cvs.length, transcripts: transcripts.length, used: apps.map((a) => [a.package, a.cv, a.transcript || ""]) } });
     }
 
-    const letters = apps.filter((app) => app.letterPdf && app.letterName && !app.letterUploaded);
+    // Idempotent: letters and packages already on myFuture are kept and counted as done, never uploaded or built twice.
+    note(tabId, "Reading your cover letters and packages on myFuture…");
+    const [existingLetters, existingPackages] = await inPage(tabId, async () => [
+      await window.__mfFrame.listDocs("Cover Letter"), await window.__mfFrame.listDocs("Application Packages")]);
+    const hasLetter = (name) => existingLetters.some((d) => d.name === name);
+    const hasPackage = (name) => existingPackages.some((d) => d.name === name);
+    const letters = apps.filter((app) => app.letterPdf && app.letterName && !hasLetter(app.letterName));
+    const lettersThere = apps.filter((app) => app.letterName && hasLetter(app.letterName));
+    let uploadResults = [];
     if (letters.length) {
       note(tabId, `${dryRun ? "Checking" : "Uploading"} ${letters.length} cover letter(s)…`);
       const files = [];
@@ -138,46 +146,49 @@
         });
         return window.__mfFrame.upload(src, docs, files, dry);
       }, [await script("upload.js"), letters.map((app, i) => ({ file: files[i].name, name: app.letterName, type: "13" })), files.map((f) => ({ name: f.name, base64: f.base64 })), dryRun]);
-      log.steps.push({ step: "upload", result: upload });
-      await updateApps((store) => {
-        for (const app of letters) {
-          const r = (upload?.results || []).find((x) => x.name === app.letterName);
-          const entry = store[String(app.postingId)];
-          if (!entry) continue;
-          if (dryRun) entry.checked = upload?.dryRun ? "ok" : "letter problem";
-          else entry.letter = r?.status === "saved" ? "done" : "failed";
-        }
-      });
-      if (!dryRun && !upload?.ok) return finish(tabId, log, "Cover letter upload failed — no packages were created.");
+      uploadResults = upload?.results || [];
+      log.steps.push({ step: "upload", result: { ...upload, alreadyThere: lettersThere.map((a) => a.letterName) } });
+      if (!dryRun && !upload?.ok) log.problem = "Some cover letters were not uploaded; their packages were skipped.";
+    } else if (lettersThere.length) {
+      log.steps.push({ step: "upload", result: { ok: true, results: [], alreadyThere: lettersThere.map((a) => a.letterName) } });
     }
+    const letterReady = (app) => !app.letterName || hasLetter(app.letterName) || uploadResults.some((r) => r.name === app.letterName && r.status === "saved");
 
-    const packages = apps.filter((app) => app.package && app.createPackage !== false)
-      // In a dry run the new letters are not on myFuture yet, so packages are checked without them.
-      .map((app) => ({ name: app.package, cv: app.cv, transcript: app.transcript || null, coverLetter: dryRun && letters.includes(app) ? null : app.letterName || null }));
-    if (packages.length) {
-      note(tabId, `${dryRun ? "Checking" : "Creating"} ${packages.length} application package(s)…`);
-      const existing = await inPage(tabId, () => window.__mfFrame.listDocs("Application Packages"));
-      const clash = packages.filter((p) => existing.some((d) => d.name === p.name)).map((p) => p.name);
-      if (clash.length && !dryRun) return finish(tabId, { ...log, steps: [...log.steps, { step: "packages", result: { ok: false, alreadyExist: clash } }] }, `Packages already exist: ${clash.join(", ")}`);
-      const created = await inPage(tabId, (src, list, dry) => window.__mfFrame.packages(src, list, dry), [await script("packages.js"), packages, dryRun]);
-      log.steps.push({ step: "packages", result: { ...created, alreadyExist: clash } });
-      await updateApps((store) => {
-        for (const app of apps) {
-          const entry = store[String(app.postingId)];
-          if (!entry || !app.package) continue;
-          entry.cvUsed = app.cv; entry.transcriptUsed = app.transcript || "";
-          if (dryRun) { entry.checked = created?.dryRun ? (entry.checked && entry.checked !== "ok" ? entry.checked : "ok") : "package problem"; continue; }
-          const r = (created?.results || []).find((x) => x.name === app.package);
-          entry.packageStatus = clash.includes(app.package) || r?.status === "created" ? "done" : r ? "failed" : entry.packageStatus;
-        }
-      });
+    const toCreate = apps.filter((app) => app.package && app.createPackage !== false && !hasPackage(app.package) && (dryRun || letterReady(app)));
+    let created = null;
+    if (toCreate.length) {
+      note(tabId, `${dryRun ? "Checking" : "Creating"} ${toCreate.length} application package(s)…`);
+      // In a dry run new letters are not on myFuture yet, so their packages are checked without the letter.
+      const list = toCreate.map((app) => ({ name: app.package, cv: app.cv, transcript: app.transcript || null,
+        coverLetter: dryRun && app.letterName && !hasLetter(app.letterName) ? null : app.letterName || null }));
+      created = await inPage(tabId, (src, items, dry) => window.__mfFrame.packages(src, items, dry), [await script("packages.js"), list, dryRun]);
     }
+    log.steps.push({ step: "packages", result: { ...(created || { ok: true, results: [] }), alreadyExist: apps.filter((a) => a.package && hasPackage(a.package)).map((a) => a.package) } });
+
+    await updateApps((store) => {
+      for (const app of apps) {
+        const entry = store[String(app.postingId)];
+        if (!entry) continue;
+        entry.cvUsed = app.cv; entry.transcriptUsed = app.transcript || "";
+        delete entry.error;
+        if (dryRun) {
+          const okPkg = !toCreate.includes(app) || created?.dryRun;
+          entry.checked = okPkg ? "ok" : "package problem";
+          continue;
+        }
+        if (app.letterName) entry.letter = letterReady(app) ? "done" : "failed";
+        const r = (created?.results || []).find((x) => x.name === app.package);
+        if (hasPackage(app.package) || r?.status === "created") entry.packageStatus = "done";
+        else if (r) entry.packageStatus = "failed";
+        else if (!letterReady(app)) { entry.packageStatus = "todo"; entry.error = "Cover letter not uploaded, so the package was not built."; }
+      }
+    });
 
     if (!dryRun && plan.probeApply) {
       const target = apps.find((app) => String(app.postingId) === String(plan.probeApply)) || apps[0];
       log.steps.push({ step: "probe", result: await probeApply(tabId, target.board || "internshipscoop", target.postingId) });
     }
-    return finish(tabId, log, dryRun ? "Check finished — nothing was saved." : "Done.");
+    return finish(tabId, log, dryRun ? "Check finished — nothing was saved." : (log.problem || "Done."));
   }
 
   async function finish(tabId, log, message) {
@@ -307,7 +318,18 @@
         }
       });
     }
-    const message = `${applied} application(s) show as submitted on myFuture.`;
+    note(tabId, "Checking your cover letters and packages…");
+    const [letterDocs, packageDocs] = await inPage(tabId, async () => [
+      await window.__mfFrame.listDocs("Cover Letter"), await window.__mfFrame.listDocs("Application Packages")]);
+    let ready = 0;
+    await updateApps((s) => {
+      for (const app of Object.values(s)) {
+        if (app.letterName && letterDocs.some((d) => d.name === app.letterName)) app.letter = "done";
+        if (app.package && packageDocs.some((d) => d.name === app.package)) { app.packageStatus = "done"; delete app.error; }
+        if (app.packageStatus === "done" && !app.applied) ready += 1;
+      }
+    });
+    const message = `${applied} application(s) submitted, ${ready} ready to apply.`;
     note(tabId, message);
     return { message };
   }
