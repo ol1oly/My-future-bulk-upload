@@ -5,6 +5,7 @@
 //   packages(packagesSrc, packages, dryRun) -> packages.js result
 //   packageOptions()                -> { '13': [...cover letters], '14': [...CVs], '15': [...transcripts] } names in the package form
 //   openBoard(boardPath)            -> loads a postings board's "View all available postings" list in the frame
+//   boardCounts(boardPath)          -> { shortlist, appliedTo } from the board overview's quick searches (incl. closed postings)
 //   frameWindow()                   -> the iframe's window (to eval more scripts in it)
 //   dispose()
 // Sources of upload.js / packages.js are passed in, so this file has no other dependency.
@@ -111,8 +112,15 @@
     if (typeof win().loadPostingTable !== "function") throw new Error("The postings list did not load");
   }
 
+  async function boardCounts(boardPath) {
+    const doc = await goto(ORIGIN + boardPath);
+    const text = doc.body ? doc.body.innerText : "";
+    const n = (label) => { const m = text.match(new RegExp(String.raw`(\d+)\s*` + label)); return m ? Number(m[1]) : null; };
+    return { shortlist: n("Shortlist"), appliedTo: n("Applied To") };
+  }
+
   window.__mfFrame = {
-    listDocs, upload, packages, packageOptions, openBoard,
+    listDocs, upload, packages, packageOptions, openBoard, boardCounts,
     frameWindow: win,
     dispose() { if (frame) frame.remove(); frame = null; }
   };

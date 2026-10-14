@@ -263,3 +263,7 @@ button.small { width: auto; margin: 0; padding: 4px 9px; font-size: 11px; }
 .prepare input[type=file] { font-size: 11px; }
 .prepare button { margin-top: 6px; }
 .apps-panel.claude { border-style: dashed; }
+.apps-note { margin: 6px 0 0; font-size: 11px; color: var(--muted); }
+.apps-note:empty { display: none; }
+.prepare textarea { width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; font: inherit; font-size: 12px; resize: vertical; }
+.prepare small { color: var(--muted); font-size: 10.5px; }

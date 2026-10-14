@@ -56,6 +56,9 @@
       "In the title (or twice in the text) → hidden.": "Dans le titre (ou deux fois dans le texte) → masquée.",
       "Reset filters": "Réinitialiser les filtres",
       "Reading postings…": "Lecture des offres…",
+    "Not on a postings list": "Pas sur une liste d'offres",
+    "Smart search reads the “View all available postings” list. Open one of these, click “View all available postings”, then open Smart search again:": "La recherche avancée lit la liste « View all available postings ». Ouvrez l'une de ces pages, cliquez sur « View all available postings », puis rouvrez la recherche avancée :",
+    "Internship / Co-op postings": "Offres de stage / co-op", "General Jobs postings": "Offres d'emploi",
       "Open Internship / Co-op (or General Jobs) → Job Postings → “View all available postings”, then open Smart search again.": "Ouvrez Stage / Co-op (ou Emplois) → Offres → « View all available postings », puis rouvrez la recherche avancée.",
       "Listing postings… {n}": "Liste des offres… {n}",
       "Reading postings {done}/{total}": "Lecture des offres {done}/{total}",
@@ -247,7 +250,15 @@
   async function scan() {
     list.replaceChildren(el("div", { class: "mst-empty", textContent: t("Reading postings…") }));
     try {
-      if (!board.ready()) throw new Error(t("Open Internship / Co-op (or General Jobs) → Job Postings → “View all available postings”, then open Smart search again."));
+      if (!board.ready()) {
+        status.textContent = t("Not on a postings list");
+        const link = (path, text) => el("a", { href: location.origin + path, textContent: t(text), style: "color:#c4122d;font-weight:650" });
+        list.replaceChildren(el("div", { class: "mst-empty" },
+          t("Smart search reads the “View all available postings” list. Open one of these, click “View all available postings”, then open Smart search again:"),
+          el("p", {}, link("/myAccount/opportunities/internshipscoop/postings.htm", "Internship / Co-op postings"), " · ",
+            link("/myAccount/opportunities/career/postings.htm", "General Jobs postings"))));
+        return;
+      }
       const rows = await board.listAll({ onProgress: ({ done }) => { status.textContent = t("Listing postings… {n}", { n: done }); } });
       const { details } = await board.fetchDetails(rows.map((row) => row.id), {
         onProgress: ({ done, total }) => { status.textContent = t("Reading postings {done}/{total}", { done, total }); progress.style.width = `${Math.round((done / total) * 100)}%`; }

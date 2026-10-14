@@ -194,7 +194,8 @@
     const name = clean(contact).split("\n")[0].replace(/,.*$/, "").trim();
     const usable = name && !/^(n\/?a|none|hiring (?:manager|team)|recruit(?:er|ment)|human resources|hr|rh)$/i.test(name) && name.length < 60;
     if (language === "fr") return usable ? `Bonjour ${name},` : "Madame, Monsieur,";
-    return usable ? `Dear ${name},` : `Dear ${clean(organization) ? `${clean(organization)} ` : ""}Hiring Team,`;
+    const org = clean(organization).replace(/[\s,]+(Inc\.?|Ltd\.?|Limited|Corporation|Corp\.?|LLC|Lt[ée]e)$/i, "");
+    return usable ? `Dear ${name},` : `Dear ${org ? `${org} ` : ""}Hiring Team,`;
   }
 
   // pairs: [{label, value}] scraped from a posting page. fallback: {title, url, text}.

@@ -4,7 +4,6 @@
   // Panel for the posting open in this tab: match score, suggested CV, and quick actions. Saved postings land in
   // "My postings" (popup-postings.js), where they can be prepared, shortlisted and applied to.
   const APPLICANT_KEY = "applicantName";
-  const TRACKER_KEY = "jobTracker";
 
   const panel = document.querySelector("#jobPanel");
   const smartButton = document.querySelector("#smartSearch");
@@ -15,12 +14,6 @@
     const node = Object.assign(document.createElement(tag), props);
     node.append(...children.filter((child) => child !== null && child !== undefined && child !== false));
     return node;
-  }
-
-  async function downloadText(content, filename, mime) {
-    const url = URL.createObjectURL(new Blob([content], { type: `${mime};charset=utf-8` }));
-    try { await chrome.downloads.download({ url, filename, conflictAction: "overwrite", saveAs: false }); }
-    finally { setTimeout(() => URL.revokeObjectURL(url), 30000); }
   }
 
   async function openSmartSearch() {
@@ -47,15 +40,6 @@
     return parsed;
   }
 
-  async function addToMyPostings(parsed, cv) {
-    const { [TRACKER_KEY]: tracker = {} } = await chrome.storage.local.get({ [TRACKER_KEY]: {} });
-    tracker[parsed.id] = { ...(tracker[parsed.id] || JobTools.trackerRow(parsed)), cv, board: boardOf(currentTab?.url),
-      postingId: parsed.fields.postingId || "", deadline: parsed.deadline || "", savedAt: new Date().toISOString().slice(0, 10) };
-    const { mstHidden = [] } = await chrome.storage.local.get({ mstHidden: [] });
-    await chrome.storage.local.set({ [TRACKER_KEY]: tracker, mstHidden: mstHidden.filter((id) => `p${id}` !== parsed.id) });
-    chrome.runtime.sendMessage({ type: "BRIDGE_APPS" }).catch(() => {});
-  }
-
   function render(parsed) {
     const fit = JobTools.scorePosting(parsed);
     const cvSelect = el("select", { id: "jobCv", title: `Matched: ${parsed.track.matched.join(", ") || "nothing specific"}` },
@@ -63,13 +47,18 @@
         el("option", { value: name, textContent: name + (name === parsed.cv ? " (suggested)" : ""), selected: name === parsed.cv })));
     const actions = el("div", { className: "job-actions" });
 
-    const add = el("button", { type: "button", textContent: "Add to My postings" });
-    add.addEventListener("click", async () => {
-      await addToMyPostings(parsed, cvSelect.value);
-      add.textContent = "Added — see My postings below";
-    });
-    actions.append(add);
-
+    if (parsed.fields.postingId) {
+      const star = el("button", { type: "button", textContent: "☆ Shortlist", title: "Add to your myFuture shortlist; it then appears in My postings" });
+      star.addEventListener("click", async () => {
+        star.disabled = true;
+        const reply = await chrome.runtime.sendMessage({ type: "BRIDGE_SHORTLIST", tabId: currentTab.id, postingId: parsed.fields.postingId, board: boardOf(currentTab.url) });
+        star.textContent = reply?.ok ? (reply.shortlisted ? "★ Shortlisted" : "☆ Shortlist") : "Could not shortlist";
+        star.title = reply?.error || star.title;
+        star.disabled = false;
+        if (reply?.ok) chrome.runtime.sendMessage({ type: "BRIDGE_SYNC", tabId: currentTab.id }).catch(() => {});
+      });
+      actions.append(star);
+    }
     if (parsed.apply.method === "myfuture" && parsed.fields.postingId) {
       const apply = el("button", { type: "button", className: "secondary", textContent: "Apply" });
       apply.title = "Opens myFuture's application form for this posting in a new tab";
@@ -96,19 +85,11 @@
     if (parsed.apply.method === "website" && parsed.apply.urls[0]) {
       actions.append(el("a", { className: "button-link secondary", href: parsed.apply.urls[0], target: "_blank", rel: "noopener", textContent: "Employer site ↗" }));
     }
-    const card = el("button", { type: "button", className: "link", textContent: "Download job card (for Claude)" });
-    card.addEventListener("click", async () => {
-      await downloadText(`${JSON.stringify({ schema: 1, savedAt: new Date().toISOString(), ...parsed, cv: cvSelect.value }, null, 2)}\n`,
-        `job-cards/${JobTools.jobFileStem(parsed)}.json`, "application/json");
-      card.textContent = "Saved to Downloads/job-cards";
-    });
-
     panel.replaceChildren(
       el("p", { className: "job-fit", textContent: `Match ${fit.score}/100${fit.hits.length ? ` · ${fit.hits.slice(0, 5).join(", ")}` : ""}${fit.excluded.length ? ` · contains "${fit.excluded[0]}"` : ""}` }),
       el("label", { htmlFor: "jobCv", textContent: "Suggested CV" }), cvSelect,
       parsed.documents.coverLetter ? el("p", { className: "job-note", textContent: "This posting asks for a cover letter." }) : null,
-      actions,
-      card
+      actions
     );
     panel.hidden = false;
   }

@@ -325,12 +325,13 @@
   async function syncMyFuture(tabId) {
     await ensureFrameOps(tabId);
     const engine = [await ownFile("lib/jobs.js"), await ownFile("orbis-board.js")];
-    const snapshot = {};
+    const snapshot = {}, counts = {};
     for (const board of Object.keys(BOARDS)) {
       note(tabId, `Reading ${board === "career" ? "General Jobs" : "Internship / Co-op"} postings…`);
+      counts[board] = await inPage(tabId, (path) => window.__mfFrame.boardCounts(path), [BOARDS[board]]);
       for (const row of await loadBoardIntoFrame(tabId, board, engine)) snapshot[row.id] = { ...row, board };
     }
-    await chrome.storage.local.set({ [BOARD_KEY]: snapshot, mfSyncedAt: new Date().toISOString() });
+    await chrome.storage.local.set({ [BOARD_KEY]: snapshot, mfCounts: counts, mfSyncedAt: new Date().toISOString() });
     note(tabId, "Checking your cover letters and packages…");
     const [letterDocs, packageDocs] = await inPage(tabId, async () => [
       await window.__mfFrame.listDocs("Cover Letter"), await window.__mfFrame.listDocs("Application Packages")]);
@@ -353,7 +354,9 @@
       }
     });
     const shortlisted = Object.values(snapshot).filter((r) => r.shortlisted).length;
-    const message = `Synced: ${shortlisted} shortlisted, ${submitted} submitted, ${started} started, ${ready} ready to apply.`;
+    const totalShortlist = Object.values(counts).reduce((sum, c) => sum + (c?.shortlist || 0), 0);
+    const closed = Math.max(0, totalShortlist - shortlisted);
+    const message = `Synced: ${shortlisted} open shortlisted posting(s)${closed ? ` (${closed} more on your myFuture shortlist are closed)` : ""}, ${submitted} submitted, ${ready} ready to apply.`;
     note(tabId, message);
     return { message };
   }
@@ -401,6 +404,32 @@
     return { message: "Opened the posting in a new tab." };
   }
 
+  // Full posting text from myFuture (hidden frame), parsed — for writing a cover letter about it.
+  async function postingDetails(tabId, item) {
+    await ensureFrameOps(tabId);
+    const engine = [await ownFile("lib/jobs.js"), await ownFile("orbis-board.js")];
+    return inPage(tabId, async (path, sources, id) => {
+      await window.__mfFrame.openBoard(path);
+      const w = window.__mfFrame.frameWindow();
+      for (const src of sources) w.eval(src);
+      await w.__orbisBoard.listAll();
+      const p = w.JobTools.parsePosting(await w.__orbisBoard.fetchDetail(String(id)));
+      return JSON.parse(JSON.stringify({ title: p.fields.title || "", organization: p.fields.organization || "", description: p.fields.description || "",
+        qualifications: p.fields.qualifications || "", template: p.coverLetter.template, salutation: p.coverLetter.slots.SALUTATION, cv: p.cv }));
+    }, [BOARDS[item.board || "internshipscoop"], engine, item.postingId]);
+  }
+
+  // Claude (on this computer, through the bridge, with no tools) writes the one posting-specific sentence.
+  async function draftLetter(tabId, item) {
+    note(tabId, "Reading the posting…");
+    const details = await postingDetails(tabId, item);
+    const posting = { ...details, postingId: String(item.postingId), title: details.title || item.title, organization: details.organization || item.organization };
+    note(tabId, "Claude is writing the sentence for this posting…");
+    const { sentence } = await host({ cmd: "draftLetter", posting });
+    note(tabId, "Review Claude's sentence, then press Create package.");
+    return { sentence, posting: { ...posting, description: undefined, qualifications: undefined } };
+  }
+
   // Prepare one application from the popup, no Claude needed: optional cover letter (existing name or a PDF the
   // student picked), then one package "<cv base>_<Org>_<date>". Records it under My postings as ready to apply.
   async function prepareOne(tabId, item, choice) {
@@ -412,6 +441,12 @@
     const docs = await inPage(tabId, async () => [await window.__mfFrame.listDocs("Application Packages"), await window.__mfFrame.listDocs("Cover Letter")]);
     for (let n = 2; docs[0].some((d) => d.name === packageName); n += 1) packageName = `${base}_${org}${n}_${day}`;
     let letterName = choice.coverLetter || "";
+    if (choice.claude?.sentence) {
+      note(tabId, "Making the cover letter PDF (Word, up to a minute)…");
+      const made = await host({ cmd: "fillLetter", posting: { ...choice.claude.posting, postingId: String(item.postingId) }, sentence: choice.claude.sentence });
+      const file = await host({ cmd: "readFile", path: made.pdf });
+      choice.letterFile = { name: file.name, base64: file.base64 };
+    }
     if (choice.letterFile) {
       letterName = `cl_${org}_${day}`;
       for (let n = 2; docs[1].some((d) => d.name === letterName); n += 1) letterName = `cl_${org}${n}_${day}`;
@@ -466,7 +501,7 @@
       const ping = await host({ cmd: "ping" });
       const { plan } = await host({ cmd: "getPlan" });
       await seedApps(plan);
-      return { ok: true, home: ping.home, plan, apps: await loadApps() };
+      return { ok: true, home: ping.home, plan, letters: ping.letters, apps: await loadApps() };
     } catch (error) {
       return { ok: false, error: error.message || String(error), apps: await loadApps() };
     }
@@ -490,7 +525,8 @@
       BRIDGE_OPEN_POSTING: () => openPostingTab(message.item),
       BRIDGE_REQUEST_PREP: () => requestPrep(message.item),
       BRIDGE_FORGET: () => forget(String(message.postingId)),
-      BRIDGE_PREPARE_ONE: () => prepareOne(message.tabId, message.item, message.choice)
+      BRIDGE_PREPARE_ONE: () => prepareOne(message.tabId, message.item, message.choice),
+      BRIDGE_DRAFT_LETTER: () => draftLetter(message.tabId, message.item)
     };
     const job = jobs[message?.type];
     if (!job) return undefined;

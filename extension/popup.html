@@ -25,11 +25,11 @@
           <strong>My postings <span id="postingsCount" class="count"></span></strong>
           <span><span id="postingsSynced"></span> <button id="syncButton" type="button" class="secondary small" title="Read your myFuture shortlist, applications, CVs and packages">Sync</button></span>
         </div>
-        <p class="apps-intro">Everything you're working on: postings you saved or shortlisted and applications in progress.
-          <b>Prepare…</b> builds a package from your CV, transcript and cover letter; <b>Apply</b> opens myFuture's form with it
-          selected. You always submit in myFuture.</p>
+        <p class="apps-intro">Your open shortlist and applications. <b>Apply</b> opens myFuture's application form (you submit
+          there). Optional: <b>Package…</b> first bundles a CV, transcript and cover letter so the form is pre-filled.</p>
         <div id="postingsFilters" class="filters"></div>
-        <button id="applyAll" type="button" class="apply-all">Apply to all ready (0)</button>
+        <p id="postingsNote" class="apps-note"></p>
+        <button id="applyAll" type="button" class="apply-all">Apply to all with a package (0)</button>
         <p id="postingsProgress" class="apps-progress" aria-live="polite"></p>
         <div id="postingsList" class="apps-list"></div>
       </section>
@@ -37,10 +37,7 @@
       <section id="claudePanel" class="apps-panel claude" hidden>
         <strong>From Claude</strong>
         <p id="claudeStatus" class="apps-intro"></p>
-        <div id="claudeSteps" class="job-actions" hidden>
-          <button id="claudeCheck" type="button" class="secondary">Check (saves nothing)</button>
-          <button id="claudeRun" type="button" class="secondary">Prepare all</button>
-        </div>
+        <button id="claudeRun" type="button" class="secondary" hidden>Upload letters &amp; build packages</button>
         <details class="apps-find">
           <summary>Find postings for Claude</summary>
           <p>Reads every posting on a board and saves it so Claude can pick matches for you.</p>
