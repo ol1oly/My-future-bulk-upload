@@ -10,6 +10,9 @@
   "use strict";
 
   const HOST = "com.mcgill_student_toolkit.bridge";
+  // Bump when messages between the pages and this service worker change. Unpacked extensions reload pages on every
+  // open but keep this worker running old code until the extension is reloaded; pages compare this number.
+  const BRIDGE_API = 4;
   const BOARDS = { internshipscoop: "/myAccount/opportunities/internshipscoop/postings.htm", career: "/myAccount/opportunities/career/postings.htm" };
   const DATED = /_\d{4}-\d{2}-\d{2}$/;
   const progress = new Map(); // tabId -> latest progress line
@@ -618,9 +621,9 @@
       const ping = await host({ cmd: "ping" });
       const { plan } = await host({ cmd: "getPlan" });
       await seedApps(plan);
-      return { ok: true, home: ping.home, plan, letters: ping.letters, apps: await loadApps() };
+      return { ok: true, api: BRIDGE_API, home: ping.home, plan, letters: ping.letters, apps: await loadApps() };
     } catch (error) {
-      return { ok: false, error: error.message || String(error), apps: await loadApps() };
+      return { ok: false, api: BRIDGE_API, error: error.message || String(error), apps: await loadApps() };
     }
   }
 

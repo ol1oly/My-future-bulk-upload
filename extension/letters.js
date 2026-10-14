@@ -4,6 +4,7 @@
   "use strict";
   const $ = (sel) => document.querySelector(sel);
   const listEl = $("#list"), statusEl = $("#status"), writeBtn = $("#write"), makeBtn = $("#make"), buildBtn = $("#build");
+  const letterText = (reply) => reply?.text ?? reply?.sentence ?? "";
   const pdfCurrent = (b) => Boolean(b?.pdf && b.pdfText === b.text);
   let myFutureTab = null, docs = null, postings = [], batch = {};
 
@@ -74,7 +75,7 @@
     previewBtn.addEventListener("click", async () => {
       if (!preview.hidden) { preview.hidden = true; return; }
       const reply = await send({ type: "BRIDGE_PREVIEW_LETTER", posting: b.posting, text: text.value });
-      preview.textContent = reply?.ok ? reply.text : `Couldn't preview: ${reply?.error || "no answer"}`;
+      preview.textContent = reply?.ok ? letterText(reply) || "No preview came back." : `Couldn't preview: ${reply?.error || "no answer"}`;
       preview.hidden = false;
     });
     const state = b.status === "built" ? el("span", { className: "state ok", textContent: `Package ${b.packageName} ready` })
@@ -93,9 +94,9 @@
 
   async function writeOne(p, feedback = "", previous = "") {
     const reply = await send({ type: "BRIDGE_DRAFT_LETTER", item: { postingId: p.postingId, board: p.board || "internshipscoop", title: p.title, organization: p.organization }, feedback, previous });
-    batch[p.postingId] = reply?.ok
-      ? { ...(batch[p.postingId] || {}), text: reply.text, style: reply.style, issues: reply.issues, posting: reply.posting, recommendedCv: reply.cv, documents: reply.documents, status: "drafted", pdf: "", pdfError: "" }
-      : { ...(batch[p.postingId] || {}), status: "error", error: reply?.error || "no answer" };
+    batch[p.postingId] = reply?.ok && letterText(reply)
+      ? { ...(batch[p.postingId] || {}), text: letterText(reply), style: reply.style, issues: reply.issues, posting: reply.posting, recommendedCv: reply.cv, documents: reply.documents, status: "drafted", pdf: "", pdfError: "" }
+      : { ...(batch[p.postingId] || {}), status: "error", error: reply?.error || "Claude's answer came back empty; reload the extension on chrome://extensions" };
     await saveBatch();
   }
 
@@ -163,6 +164,8 @@
     writeBtn.addEventListener("click", writeAll);
     makeBtn.addEventListener("click", makeAll);
     buildBtn.addEventListener("click", buildAll);
+    const status = await chrome.runtime.sendMessage({ type: "BRIDGE_STATUS" });
+    if (status && status.api !== 4) say("The extension's background part is out of date. Open chrome://extensions and press the reload icon on myFuture Toolkit, then reopen this.", true);
     await load();
   }
 

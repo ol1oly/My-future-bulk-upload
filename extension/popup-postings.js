@@ -20,6 +20,8 @@
     return node;
   };
   const send = (message) => chrome.runtime.sendMessage({ ...message, tabId: tab?.id });
+  const EXPECTED_API = 4; // must match BRIDGE_API in bridge.js
+  const letterText = (reply) => reply?.text ?? reply?.sentence ?? "";
   const lettersReady = () => Boolean(bridge?.letters && Object.values(bridge.letters).every(Boolean));
 
   function say(text, bad = false) {
@@ -168,7 +170,7 @@
       if (!previewBox.hidden) { previewBox.hidden = true; previewBtn.textContent = "Preview the whole letter"; return; }
       const reply = await send({ type: "BRIDGE_PREVIEW_LETTER", posting: state.drafted, text: sentence.value });
       if (!reply?.ok) { say(`Couldn't preview: ${reply?.error || "no answer"}`, true); return; }
-      previewBox.textContent = reply.text;
+      previewBox.textContent = letterText(reply) || "No preview came back.";
       previewBox.hidden = false;
       previewBtn.textContent = "Hide preview";
     });
@@ -239,7 +241,8 @@
         const reply = await send({ type: "BRIDGE_DRAFT_LETTER", item: ref, feedback, previous: state.drafted ? sentence.value : "" });
         if (!reply?.ok) { say(`Claude couldn't write it: ${reply?.error || "no answer"}`, true); return; }
         state.drafted = reply.posting;
-        state.sentence = sentence.value = reply.text;
+        if (!letterText(reply)) { say("Claude's answer came back empty. Reload the extension on chrome://extensions and try again.", true); return; }
+        state.sentence = sentence.value = letterText(reply);
         state.pdf = "";
         change.value = "";
         sentence.rows = reply.style === "free" ? 12 : 4;
@@ -337,6 +340,7 @@
 
   async function initClaude() {
     bridge = await send({ type: "BRIDGE_STATUS" });
+    if (bridge && bridge.api !== EXPECTED_API) say("The extension's background part is out of date. Open chrome://extensions and press the reload icon on myFuture Toolkit, then reopen this.", true);
     if (!bridge?.ok) { bridge = null; return; }
     refreshClaude();
     if (onMyFuture) claudeRun.addEventListener("click", () => run(claudeRun, { type: "BRIDGE_RUN_PLAN" }, "Working…"));
