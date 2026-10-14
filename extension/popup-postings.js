@@ -7,12 +7,12 @@
   const $ = (sel) => document.querySelector(sel);
   const panel = $("#postingsPanel"), listEl = $("#postingsList"), countEl = $("#postingsCount"), syncedEl = $("#postingsSynced");
   const progressEl = $("#postingsProgress"), filtersEl = $("#postingsFilters"), noteEl = $("#postingsNote");
-  const applyAllBtn = $("#applyAll"), syncBtn = $("#syncButton");
+  const applyAllBtn = $("#applyAll"), syncBtn = $("#syncButton"), findBtn = $("#findMatches");
   const claudePanel = $("#claudePanel"), claudeStatus = $("#claudeStatus"), claudeRun = $("#claudeRun");
-  const FILTERS = [["active", "Active"], ["prepare", "No package yet"], ["ready", "Package ready"], ["submitted", "Submitted"], ["shortlist", "★ Shortlist"]];
+  const FILTERS = [["active", "Active"], ["suggested", "Suggested"], ["prepare", "No package yet"], ["ready", "Package ready"], ["submitted", "Submitted"], ["shortlist", "★ Shortlist"]];
   const STAGE_LABEL = { submitted: "Submitted", started: "Started", ready: "Package ready", prepare: "No package yet" };
   let tab = null, onMyFuture = false, bridge = null;
-  let filter = "active", items = [], docs = null, counts = {}, openPrepare = "", armedUntil = 0, hiddenCount = 0;
+  let filter = "active", items = [], docs = null, counts = {}, openPrepare = "", armedUntil = 0, hiddenCount = 0, letterFiles = {};
 
   const el = (tag, props = {}, ...children) => {
     const node = Object.assign(document.createElement(tag), props);
@@ -28,7 +28,8 @@
   }
 
   async function load() {
-    const data = await chrome.storage.local.get({ mstApps: {}, jobTracker: {}, mfBoard: {}, mstHidden: [], mfDocs: null, mfSyncedAt: "", mfCounts: {} });
+    const data = await chrome.storage.local.get({ mstApps: {}, jobTracker: {}, mfBoard: {}, mstHidden: [], mfDocs: null, mfSyncedAt: "", mfCounts: {}, mstSuggested: {}, mstLetterFiles: {} });
+    letterFiles = data.mstLetterFiles;
     docs = data.mfDocs;
     counts = data.mfCounts;
     hiddenCount = data.mstHidden.length;
@@ -37,6 +38,10 @@
     for (const row of Object.values(data.mfBoard)) {
       if (!row.shortlisted && !row.appStatus) continue;
       Object.assign(get(row.id), { board: row.board, title: row.title, organization: row.organization, deadlineText: row.deadlineText });
+    }
+    for (const sug of Object.values(data.mstSuggested)) {
+      Object.assign(get(sug.postingId), { board: sug.board, title: sug.title, organization: sug.organization, deadlineText: sug.deadlineText || sug.deadline,
+        suggested: true, reason: sug.reason, suggestedBy: sug.by, appStatus: sug.appStatus || "" });
     }
     for (const card of Object.values(data.jobTracker)) {
       const id = card.postingId || (String(card.id || "").match(/^p(\d+)$/) || [])[1];
@@ -64,7 +69,7 @@
   }
 
   const chip = (text, cls = "") => el("span", { className: `step ${cls}`, textContent: text });
-  const matches = (i, key) => key === "active" ? i.stage !== "submitted" : key === "shortlist" ? i.shortlisted && i.stage !== "submitted" : key === "prepare" ? ["prepare", "started"].includes(i.stage) && !i.packageStatus : i.stage === key;
+  const matches = (i, key) => key === "active" ? i.stage !== "submitted" : key === "suggested" ? i.suggested && i.stage !== "submitted" : key === "shortlist" ? i.shortlisted && i.stage !== "submitted" : key === "prepare" ? ["prepare", "started"].includes(i.stage) && !i.packageStatus : i.stage === key;
 
   function render() {
     const n = Object.fromEntries(FILTERS.map(([key]) => [key, items.filter((i) => matches(i, key)).length]));
@@ -113,6 +118,7 @@
       act(item.shortlisted ? "★" : "☆", "secondary icon", (b) => run(b, { type: "BRIDGE_SHORTLIST", postingId: item.postingId, board: ref.board }, "…"),
         item.shortlisted ? "Remove from your myFuture shortlist" : "Add to your myFuture shortlist", true);
     }
+    if (letterFiles[item.postingId]) act("View letter", "link", (b) => run(b, { type: "BRIDGE_VIEW_LETTER", postingId: item.postingId }, "Opening…"), "Open the cover letter used in this package");
     act("Open", "link", (b) => run(b, { type: "BRIDGE_OPEN_POSTING", item: ref }, "Opening…"), "Open the posting in a new tab");
     // Shortlisted postings leave the list with ★ (unshortlist on myFuture), so the list and myFuture never disagree.
     if (!item.shortlisted) act("Hide", "link", (b) => run(b, { type: "BRIDGE_FORGET", postingId: item.postingId }, "Hiding…"), "Hide from this list (doesn't change myFuture)");
@@ -121,12 +127,14 @@
       chip(STAGE_LABEL[item.stage], { submitted: "ok", ready: "ok", started: "warn" }[item.stage] || ""),
       item.shortlisted ? chip("★ Shortlisted") : null,
       item.letterName ? chip(`Letter ${item.letter === "done" ? "✓" : "○"}`, item.letter === "done" ? "ok" : "") : null,
+      item.suggested ? chip(item.suggestedBy === "claude" ? "Suggested by Claude" : "Suggested") : null,
       item.fromClaude ? chip("From Claude") : null);
     return el("div", { className: `app-row${item.stage === "submitted" ? " applied" : ""}` },
       el("div", { className: "app-main" },
         el("strong", { textContent: `${item.organization || "Posting"} — ${item.title || item.postingId}` }),
         el("span", { className: "app-meta", textContent: [item.deadlineText && `deadline ${item.deadlineText}`, item.package && `package ${item.package}`].filter(Boolean).join(" · ") }),
         chips,
+        item.suggested && item.reason && item.stage !== "submitted" ? el("span", { className: "app-reason", textContent: item.reason }) : null,
         item.error ? el("span", { className: "app-error", textContent: item.error }) : null,
         openPrepare === item.postingId ? packageForm(item, ref) : null,
         actions));
@@ -162,11 +170,34 @@
     const write = el("button", { type: "button", className: "secondary", textContent: state.drafted ? "Write again" : "Write with Claude", hidden: true });
     const sentence = el("textarea", { hidden: true, rows: 4, value: state.sentence || "", placeholder: "Claude's sentence about this posting appears here; edit it if you like." });
     const hint = el("small", { hidden: true, textContent: "Claude writes the one sentence about this posting from your profile; the rest is your template. Takes ~10 s, then ~1 min to make the PDF." });
+    const previewBtn = el("button", { type: "button", className: "link", textContent: "Preview the whole letter", hidden: true });
+    const previewBox = el("pre", { className: "letter-preview", hidden: true });
+    const filePreview = el("button", { type: "button", className: "link", textContent: "Preview this PDF", hidden: true });
+    previewBtn.addEventListener("click", async () => {
+      if (!previewBox.hidden) { previewBox.hidden = true; previewBtn.textContent = "Preview the whole letter"; return; }
+      const reply = await send({ type: "BRIDGE_PREVIEW_LETTER", posting: state.drafted, sentence: sentence.value });
+      if (!reply?.ok) { say(`Couldn't preview: ${reply?.error || "no answer"}`, true); return; }
+      previewBox.textContent = reply.text;
+      previewBox.hidden = false;
+      previewBtn.textContent = "Hide preview";
+    });
+    filePreview.addEventListener("click", async () => {
+      const picked = file.files[0];
+      if (!picked) return;
+      const bytes = new Uint8Array(await picked.arrayBuffer());
+      let binary = "";
+      for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      await send({ type: "BRIDGE_VIEW_FILE", file: { name: picked.name, base64: btoa(binary) } });
+    });
+    file.addEventListener("change", () => { filePreview.hidden = !file.files[0]; });
 
     const sync = () => {
       file.hidden = letter.value !== "__upload";
       write.hidden = hint.hidden = letter.value !== "__claude";
       sentence.hidden = letter.value !== "__claude" || !state.drafted;
+      previewBtn.hidden = sentence.hidden;
+      if (previewBtn.hidden) previewBox.hidden = true;
+      filePreview.hidden = file.hidden || !file.files[0];
     };
     const remember = () => { state.cv = cv.value; state.transcript = transcript.value; state.letter = letter.value; state.sentence = sentence.value; };
 
@@ -179,7 +210,8 @@
       if (!state.letter) letter.value = rec.documents?.coverLetter ? (lettersReady() ? "__claude" : "") : "";
       const needs = [rec.documents?.transcript && "a transcript", rec.documents?.coverLetter && "a cover letter"].filter(Boolean);
       why.textContent = `Recommended CV: ${rec.cv}${rec.matched?.length ? ` (matches ${rec.matched.slice(0, 5).join(", ")})` : ""}${pick.exact ? "" : " — closest name in your CVs"}. `
-        + (needs.length ? `This posting asks for ${needs.join(" and ")}.` : "This posting asks only for a CV.");
+        + (needs.length ? `This posting asks for ${needs.join(" and ")}.` : "This posting asks only for a CV.")
+        + (rec.documents?.coverLetter && !lettersReady() ? " Pick one of your cover letters below, or upload a PDF." : "");
       sync();
     };
     if (state.cv) cv.value = state.cv;
@@ -230,7 +262,7 @@
       why,
       el("label", { textContent: "CV" }), cv,
       el("label", { textContent: "Transcript" }), transcript,
-      el("label", { textContent: "Cover letter" }), letter, file, hint, write, sentence,
+      el("label", { textContent: "Cover letter" }), letter, file, filePreview, hint, write, sentence, previewBtn, previewBox,
       create);
   }
 
@@ -243,7 +275,6 @@
       const reply = await send(message);
       ok = Boolean(reply?.ok);
       say(ok ? reply.message || (reply.log ? describe(reply.log) : "Done.") : `Stopped: ${reply?.error || "no answer"}`, !ok);
-      if (ok && reply.top) showScan(reply);
     } finally {
       button.textContent = label;
       button.disabled = false;
@@ -271,35 +302,22 @@
     return out.join(" ") || "Done.";
   }
 
-  function showScan(reply) {
-    $("#scanResult").replaceChildren(
-      el("p", { textContent: `${reply.count} postings read, ${reply.matching} match. Ask Claude in Claude Code to pick from this scan. Best matches:` }),
-      el("ol", {}, ...reply.top.map((p) => el("li", { textContent: `${p.score} · ${p.title} — ${p.organization}${p.mcgill ? "" : " (external)"}` }))));
-  }
-
   function refreshClaude() {
     if (!bridge) return;
     const planned = items.filter((i) => i.fromClaude);
     const left = planned.filter((i) => i.stage === "prepare");
-    claudeStatus.textContent = !planned.length
-      ? "Nothing from Claude right now. In Claude Code, ask it to find and prepare internships; they appear in My postings."
-      : left.length
-        ? `Claude prepared ${planned.length} application(s) with tailored cover letters. ${left.length} still need their letter uploaded and package built on myFuture.`
-        : `Everything Claude prepared (${planned.length}) has its package on myFuture. Apply from My postings.`;
-    claudeRun.hidden = !left.length;
+    claudePanel.hidden = !left.length; // only shown when Claude Code prepared letters that still need uploading
+    claudeStatus.textContent = `Claude Code prepared ${planned.length} application(s) with tailored cover letters; ${left.length} still need their letter uploaded and their package built on myFuture.`;
     claudeRun.textContent = `Upload letters & build packages (${left.length})`;
   }
 
   async function initClaude() {
     bridge = await send({ type: "BRIDGE_STATUS" });
     if (!bridge?.ok) { bridge = null; return; }
-    claudePanel.hidden = false;
     refreshClaude();
-    for (const [id, type, busy, board] of [["#claudeRun", "BRIDGE_RUN_PLAN", "Working…"], ["#scanCoop", "BRIDGE_SCAN", "Reading…", "internshipscoop"], ["#scanCareer", "BRIDGE_SCAN", "Reading…", "career"]]) {
-      const b = $(id);
-      if (!onMyFuture) { b.disabled = true; b.title = "Open a myFuture page first"; continue; }
-      b.addEventListener("click", () => run(b, { type, board }, busy));
-    }
+    if (onMyFuture) claudeRun.addEventListener("click", () => run(claudeRun, { type: "BRIDGE_RUN_PLAN" }, "Working…"));
+    else { claudeRun.disabled = true; claudeRun.title = "Open a myFuture page first"; }
+    if (bridge.letters?.claude && bridge.letters.profile) findBtn.title = "Reads every Internship / Co-op posting (~40 s); Claude then picks the best ones for your profile";
   }
 
   chrome.runtime.onMessage.addListener((message) => {
@@ -313,6 +331,11 @@
     panel.hidden = false;
     if (!onMyFuture) { syncBtn.disabled = true; syncBtn.title = "Open a myFuture page first"; }
     syncBtn.addEventListener("click", () => run(syncBtn, { type: "BRIDGE_SYNC" }, "Syncing…"));
+    if (!onMyFuture) { findBtn.disabled = true; findBtn.title = "Open a myFuture page first"; }
+    findBtn.addEventListener("click", async () => {
+      filter = "suggested";
+      await run(findBtn, { type: "BRIDGE_FIND_MATCHES", board: "internshipscoop" }, "Finding…");
+    });
     applyAllBtn.addEventListener("click", () => {
       const ready = items.filter((i) => i.stage === "ready");
       if (!ready.length) { say("No posting has a package yet. Use Apply on a posting (you choose documents in myFuture), or Package… first.", true); return; }

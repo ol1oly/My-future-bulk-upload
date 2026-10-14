@@ -23,7 +23,9 @@
       <section id="postingsPanel" class="apps-panel" hidden>
         <div class="apps-head">
           <strong>My postings <span id="postingsCount" class="count"></span></strong>
-          <span><span id="postingsSynced"></span> <button id="syncButton" type="button" class="secondary small" title="Read your myFuture shortlist, applications, CVs and packages">Sync</button></span>
+          <span><span id="postingsSynced"></span>
+            <button id="findMatches" type="button" class="secondary small" title="Reads every Internship / Co-op posting (~40 s) and suggests the best matches">Find matches</button>
+            <button id="syncButton" type="button" class="secondary small" title="Read your myFuture shortlist, applications, CVs and packages">Sync</button></span>
         </div>
         <p class="apps-intro">Your open shortlist and applications. <b>Apply</b> opens myFuture's application form (you submit
           there). Optional: <b>Package…</b> first bundles a CV, transcript and cover letter so the form is pre-filled.</p>
@@ -37,16 +39,7 @@
       <section id="claudePanel" class="apps-panel claude" hidden>
         <strong>From Claude</strong>
         <p id="claudeStatus" class="apps-intro"></p>
-        <button id="claudeRun" type="button" class="secondary" hidden>Upload letters &amp; build packages</button>
-        <details class="apps-find">
-          <summary>Find postings for Claude</summary>
-          <p>Reads every posting on a board and saves it so Claude can pick matches for you.</p>
-          <div class="job-actions">
-            <button id="scanCoop" type="button" class="secondary">Scan Internship/Co-op</button>
-            <button id="scanCareer" type="button" class="secondary">Scan General Jobs</button>
-          </div>
-          <div id="scanResult" class="apps-scan"></div>
-        </details>
+        <button id="claudeRun" type="button" class="secondary">Upload letters &amp; build packages</button>
       </section>
     </main>
     <script src="lib/jobs.js"></script>

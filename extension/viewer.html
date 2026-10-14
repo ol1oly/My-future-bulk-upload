@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Cover letter</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #525659; font: 14px system-ui, "Segoe UI", sans-serif; }
+      header { position: fixed; inset: 0 0 auto 0; height: 40px; display: flex; align-items: center; gap: 12px; padding: 0 16px; background: #16181d; color: #fff; }
+      header a { color: #fff; }
+      iframe { position: fixed; inset: 40px 0 0 0; width: 100%; height: calc(100% - 40px); border: 0; }
+      p { color: #fff; padding: 60px 16px; }
+    </style>
+  </head>
+  <body>
+    <header><strong id="name">Cover letter</strong><a id="download" download>Download</a></header>
+    <iframe id="pdf" title="Cover letter PDF"></iframe>
+    <script src="viewer.js"></script>
+  </body>
+</html>

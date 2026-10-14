@@ -269,3 +269,9 @@ button.small { width: auto; margin: 0; padding: 4px 9px; font-size: 11px; }
 .prepare small { color: var(--muted); font-size: 10.5px; }
 .prepare .recommend { color: var(--ink); font-size: 11px; line-height: 1.35; }
 .apps-note button.link { width: auto; margin: 0; padding: 0; font-size: 11px; }
+.app-reason { display: block; margin-top: 3px; font-size: 11px; color: var(--ink); }
+.letter-preview { white-space: pre-wrap; font: 11px/1.45 system-ui, sans-serif; background: #fff; border: 1px solid var(--line); border-radius: 6px; padding: 8px; max-height: 260px; overflow: auto; margin: 4px 0 0; }
+.prepare button.link { width: auto; justify-self: start; margin: 0; padding: 2px 0; font-size: 11px; }
+.apps-head { flex-wrap: wrap; row-gap: 6px; }
+.apps-head > strong { white-space: nowrap; }
+.apps-head > span { margin-left: auto; }

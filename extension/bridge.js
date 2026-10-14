@@ -109,7 +109,13 @@
     }, [BOARDS[board], engine, prefs]);
     result.board = board;
     result.scannedAt = new Date().toISOString();
-    const saved = await host({ cmd: "writeResult", name: `scan-${board}`, data: result });
+    let saved = { path: "" };
+    try { saved = await host({ cmd: "writeResult", name: `scan-${board}`, data: result }); } catch (error) { /* no bridge: keep it in the extension only */ }
+    const compact = result.postings.map((p) => ({ postingId: p.postingId, board, title: p.fields.title, organization: p.fields.organization || "",
+      deadline: p.deadline, deadlineText: p.row.deadlineText, method: p.apply.method, language: p.fields.jobLanguage || p.language, score: p.fit.score,
+      matched: p.fit.hits, why: p.why, appStatus: p.row.appStatus || "", cv: p.cv, documents: p.documents,
+      summary: String(p.fields.description || "").replace(/\s+/g, " ").slice(0, 600) }));
+    await chrome.storage.local.set({ mfLastScan: compact });
     const matching = result.postings.filter((p) => !p.why).sort((a, b) => b.fit.score - a.fit.score);
     note(tabId, `Read ${result.postings.length} postings.`);
     return {
@@ -440,6 +446,56 @@
     return { sentence, posting: { ...posting, description: undefined, qualifications: undefined } };
   }
 
+  // Find matches: read the board, rank by keywords (everyone); with Claude Code + a profile, Claude picks the best of the
+  // top 40 and says why. Suggestions appear in My postings.
+  async function findMatches(tabId, board = "internshipscoop") {
+    await scanBoard(tabId, board);
+    const stored = (await chrome.storage.local.get({ mfLastScan: [] })).mfLastScan;
+    const open = stored.filter((p) => !p.why && !/submitted|soumise/i.test(p.appStatus || "")).sort((a, b) => b.score - a.score);
+    if (!open.length) return { message: "No open posting matches your Smart search filters." };
+    let picks = [], by = "keywords";
+    let letters = null;
+    try { letters = (await host({ cmd: "ping" })).letters; } catch (error) { letters = null; }
+    if (letters?.claude && letters.profile) {
+      note(tabId, "Claude is picking the best matches for your profile…");
+      try {
+        picks = (await host({ cmd: "rankPostings", candidates: open.slice(0, 40) })).picks;
+        by = "claude";
+      } catch (error) {
+        note(tabId, `Claude couldn't rank them (${error.message}); using keyword matches.`);
+      }
+    }
+    if (!picks.length) picks = open.slice(0, 8).map((p) => ({ postingId: p.postingId, reason: p.matched?.length ? `Matches ${p.matched.slice(0, 5).join(", ")}` : "High keyword score" }));
+    const suggested = {};
+    for (const pick of picks) {
+      const p = open.find((x) => x.postingId === pick.postingId);
+      if (p) suggested[p.postingId] = { ...p, reason: pick.reason, by, suggestedAt: new Date().toISOString() };
+    }
+    const { [HIDDEN_KEY]: hidden = [] } = await chrome.storage.local.get({ [HIDDEN_KEY]: [] });
+    await chrome.storage.local.set({ mstSuggested: suggested, [HIDDEN_KEY]: hidden.filter((id) => !suggested[id]) });
+    chrome.runtime.sendMessage({ type: "BRIDGE_APPS" }).catch(() => {});
+    const message = `${Object.keys(suggested).length} suggestion(s) ${by === "claude" ? "picked by Claude" : "by keyword match"} — see the Suggested filter.`;
+    note(tabId, message);
+    return { message };
+  }
+
+  // Letters: keep the PDF used in each package so the student can open it; show any PDF in the extension's viewer.
+  async function keepLetter(postingId, file) {
+    const { mstLetterFiles = {} } = await chrome.storage.local.get({ mstLetterFiles: {} });
+    mstLetterFiles[postingId] = { name: file.name, base64: file.base64 };
+    await chrome.storage.local.set({ mstLetterFiles });
+  }
+  async function viewFile(file) {
+    if (!file?.base64) throw new Error("No letter to show.");
+    await chrome.storage.session.set({ viewPdf: file });
+    await chrome.tabs.create({ url: chrome.runtime.getURL("viewer.html") });
+    return { message: "Opened the letter in a new tab." };
+  }
+  async function viewLetter(postingId) {
+    const { mstLetterFiles = {} } = await chrome.storage.local.get({ mstLetterFiles: {} });
+    return viewFile(mstLetterFiles[postingId]);
+  }
+
   // Prepare one application from the popup, no Claude needed: optional cover letter (existing name or a PDF the
   // student picked), then one package "<cv base>_<Org>_<date>". Records it under My postings as ready to apply.
   async function prepareOne(tabId, item, choice) {
@@ -469,6 +525,7 @@
       }, [await script("upload.js"), { file: choice.letterFile.name, name: letterName, type: "13" }, choice.letterFile]);
       if (!upload?.ok) throw new Error("The cover letter could not be uploaded.");
     }
+    if (choice.letterFile) await keepLetter(String(item.postingId), choice.letterFile);
     note(tabId, `Creating package ${packageName}…`);
     const created = await inPage(tabId, (src, list) => window.__mfFrame.packages(src, list, false),
       [await script("packages.js"), [{ name: packageName, cv: choice.cv, transcript: choice.transcript || null, coverLetter: letterName || null }]]);
@@ -503,6 +560,9 @@
     delete jobTracker[`p${postingId}`];
     await chrome.storage.local.set({ [HIDDEN_KEY]: hidden, jobTracker });
     await updateApps((s) => { delete s[postingId]; });
+    const { mstSuggested = {} } = await chrome.storage.local.get({ mstSuggested: {} });
+    delete mstSuggested[postingId];
+    await chrome.storage.local.set({ mstSuggested });
     return { message: "Hidden from My postings." };
   }
 
@@ -547,7 +607,11 @@
       APPLY_DONE: () => setApplyTab(_sender?.tab?.id ?? message.tabId, null).then(() => ({})),
       BRIDGE_PREPARE_ONE: () => prepareOne(message.tabId, message.item, message.choice),
       BRIDGE_DRAFT_LETTER: () => draftLetter(message.tabId, message.item),
-      BRIDGE_RECOMMEND: () => recommend(message.tabId, message.item)
+      BRIDGE_RECOMMEND: () => recommend(message.tabId, message.item),
+      BRIDGE_FIND_MATCHES: () => findMatches(message.tabId, message.board),
+      BRIDGE_PREVIEW_LETTER: () => host({ cmd: "previewLetter", posting: message.posting, sentence: message.sentence }),
+      BRIDGE_VIEW_LETTER: () => viewLetter(String(message.postingId)),
+      BRIDGE_VIEW_FILE: () => viewFile(message.file)
     };
     const job = jobs[message?.type];
     if (!job) return undefined;
