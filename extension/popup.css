@@ -275,3 +275,7 @@ button.small { width: auto; margin: 0; padding: 4px 9px; font-size: 11px; }
 .apps-head { flex-wrap: wrap; row-gap: 6px; }
 .apps-head > strong { white-space: nowrap; }
 .apps-head > span { margin-left: auto; }
+.job-status { margin: 6px 0 0; font-size: 12px; font-weight: 650; color: var(--muted); }
+.job-status:empty { display: none; }
+.job-status.starred { color: #7a5600; }
+.job-status.done { color: #14632b; }

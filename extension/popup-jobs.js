@@ -42,30 +42,31 @@
 
   function render(parsed) {
     const fit = JobTools.scorePosting(parsed);
-    const cvSelect = el("select", { id: "jobCv", title: `Matched: ${parsed.track.matched.join(", ") || "nothing specific"}` },
-      ...["en_normal", "en_fullstack", "en_games", "fr_normal", "fr_fullstack", "fr_games"].map((name) =>
-        el("option", { value: name, textContent: name + (name === parsed.cv ? " (suggested)" : ""), selected: name === parsed.cv })));
+    const postingId = parsed.fields.postingId;
+    const board = boardOf(currentTab?.url);
+    const statusLine = el("p", { className: "job-status" });
+    const cvLine = el("p", { className: "job-note" });
     const actions = el("div", { className: "job-actions" });
+    let star = null, apply = null;
 
-    if (parsed.fields.postingId) {
-      const star = el("button", { type: "button", textContent: "☆ Shortlist", title: "Add to your myFuture shortlist; it then appears in My postings" });
+    if (postingId) {
+      star = el("button", { type: "button", textContent: "☆ Shortlist", title: "Add to your myFuture shortlist; it then appears in My postings" });
       star.addEventListener("click", async () => {
         star.disabled = true;
-        const reply = await chrome.runtime.sendMessage({ type: "BRIDGE_SHORTLIST", tabId: currentTab.id, postingId: parsed.fields.postingId, board: boardOf(currentTab.url) });
-        star.textContent = reply?.ok ? (reply.shortlisted ? "★ Shortlisted" : "☆ Shortlist") : "Could not shortlist";
-        star.title = reply?.error || star.title;
+        const reply = await chrome.runtime.sendMessage({ type: "BRIDGE_SHORTLIST", tabId: currentTab.id, postingId, board });
         star.disabled = false;
-        if (reply?.ok) chrome.runtime.sendMessage({ type: "BRIDGE_SYNC", tabId: currentTab.id }).catch(() => {});
+        if (reply?.ok) showStatus({ shortlisted: reply.shortlisted, submitted: state.submitted, live: true });
+        else { star.textContent = "Could not change the shortlist"; star.title = reply?.error || ""; }
       });
       actions.append(star);
     }
-    if (parsed.apply.method === "myfuture" && parsed.fields.postingId) {
-      const apply = el("button", { type: "button", className: "secondary", textContent: "Apply" });
+    if (parsed.apply.method === "myfuture" && postingId) {
+      apply = el("button", { type: "button", className: "secondary", textContent: "Apply" });
       apply.title = "Opens myFuture's application form for this posting in a new tab";
       apply.addEventListener("click", async () => {
         apply.disabled = true;
         const reply = await chrome.runtime.sendMessage({ type: "BRIDGE_OPEN_FORMS", tabId: currentTab.id,
-          items: [{ postingId: parsed.fields.postingId, board: boardOf(currentTab.url), title: parsed.fields.title, organization: parsed.fields.organization || "" }] });
+          items: [{ postingId, board, title: parsed.fields.title, organization: parsed.fields.organization || "" }] });
         apply.textContent = reply?.ok ? "Form opened" : "Could not open";
         apply.title = reply?.error || "";
         apply.disabled = false;
@@ -85,13 +86,45 @@
     if (parsed.apply.method === "website" && parsed.apply.urls[0]) {
       actions.append(el("a", { className: "button-link secondary", href: parsed.apply.urls[0], target: "_blank", rel: "noopener", textContent: "Employer site ↗" }));
     }
+
+    // Shortlisted / submitted: what the extension knows first (instant), then confirmed live from myFuture.
+    const state = { shortlisted: false, submitted: false };
+    function showStatus({ shortlisted, submitted, live }) {
+      Object.assign(state, { shortlisted, submitted });
+      statusLine.textContent = submitted ? "✓ You already submitted an application to this posting."
+        : shortlisted ? "★ This posting is on your myFuture shortlist." : live ? "Not on your shortlist yet." : "";
+      statusLine.className = `job-status${submitted ? " done" : shortlisted ? " starred" : ""}`;
+      if (star) {
+        star.hidden = submitted;
+        star.textContent = shortlisted ? "★ Shortlisted (remove)" : "☆ Shortlist";
+        star.title = shortlisted ? "Remove from your myFuture shortlist" : "Add to your myFuture shortlist; it then appears in My postings";
+      }
+      if (apply) apply.hidden = submitted;
+    }
+
     panel.replaceChildren(
       el("p", { className: "job-fit", textContent: `Match ${fit.score}/100${fit.hits.length ? ` · ${fit.hits.slice(0, 5).join(", ")}` : ""}${fit.excluded.length ? ` · contains "${fit.excluded[0]}"` : ""}` }),
-      el("label", { htmlFor: "jobCv", textContent: "Suggested CV" }), cvSelect,
+      statusLine,
+      cvLine,
       parsed.documents.coverLetter ? el("p", { className: "job-note", textContent: "This posting asks for a cover letter." }) : null,
       actions
     );
     panel.hidden = false;
+
+    (async () => {
+      const { mfBoard = {}, mstApps = {}, mfDocs = null } = await chrome.storage.local.get({ mfBoard: {}, mstApps: {}, mfDocs: null });
+      // Recommended CV: the student's newest CV document for the suggested language/track, when known.
+      const doc = (mfDocs?.cvs || []).filter((name) => name.startsWith(`${parsed.cv}_`) || name === parsed.cv).sort().reverse()[0];
+      cvLine.textContent = `Recommended CV: ${doc || parsed.cv}${parsed.track.matched.length ? ` (matches ${parsed.track.matched.slice(0, 4).join(", ")})` : ""}`;
+      if (postingId) {
+        const row = mfBoard[postingId], app = mstApps[postingId];
+        showStatus({ shortlisted: Boolean(row?.shortlisted), submitted: JobTools.isSubmitted(row?.appStatus) || Boolean(app?.applied), live: false });
+        statusLine.textContent ||= "Checking myFuture…";
+        const live = await chrome.runtime.sendMessage({ type: "BRIDGE_POSTING_STATUS", tabId: currentTab.id, postingId, board });
+        if (live?.ok && live.found) showStatus({ shortlisted: live.shortlisted, submitted: live.submitted, live: true });
+        else if (statusLine.textContent === "Checking myFuture…") statusLine.textContent = "";
+      }
+    })();
   }
 
   async function scan(tab) {

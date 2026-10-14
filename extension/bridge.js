@@ -370,24 +370,39 @@
     return { message };
   }
 
-  async function toggleShortlistJob(tabId, postingId, board) {
+  // One posting's row on its board (shortlisted? submitted?), read live in a hidden frame. Optionally toggles the shortlist.
+  async function boardRow(tabId, postingId, board, toggle) {
     await ensureFrameOps(tabId);
     const engine = [await ownFile("lib/jobs.js"), await ownFile("orbis-board.js")];
-    const shortlisted = await inPage(tabId, async (path, sources, id) => {
+    const row = await inPage(tabId, async (path, sources, id, flip) => {
       await window.__mfFrame.openBoard(path);
       const w = window.__mfFrame.frameWindow();
       for (const src of sources) w.eval(src);
-      const rows = await w.__orbisBoard.listAll();
-      const row = rows.find((r) => r.id === String(id));
-      if (!row) throw new Error("This posting is no longer listed on myFuture.");
-      await w.__orbisBoard.toggleShortlist(String(id));
-      return !row.shortlisted;
-    }, [BOARDS[board || "internshipscoop"], engine, postingId]);
+      const found = (await w.__orbisBoard.listAll()).find((r) => r.id === String(id));
+      if (!found) return null;
+      if (flip) { await w.__orbisBoard.toggleShortlist(String(id)); found.shortlisted = !found.shortlisted; }
+      return { id: found.id, title: found.title, organization: found.organization, city: found.city, deadlineText: found.deadlineText,
+        appStatus: found.appStatus, shortlisted: found.shortlisted, canApply: found.canApply };
+    }, [BOARDS[board || "internshipscoop"], engine, postingId, Boolean(toggle)]);
+    if (!row) return null;
+    // Update only this posting in the stored snapshot (no full sync).
     const { [BOARD_KEY]: snapshot = {} } = await chrome.storage.local.get({ [BOARD_KEY]: {} });
-    if (snapshot[postingId]) snapshot[postingId].shortlisted = shortlisted;
+    snapshot[postingId] = { ...(snapshot[postingId] || {}), ...row, board: board || "internshipscoop" };
     await chrome.storage.local.set({ [BOARD_KEY]: snapshot });
     chrome.runtime.sendMessage({ type: "BRIDGE_APPS" }).catch(() => {});
-    return { message: shortlisted ? "Added to your myFuture shortlist." : "Removed from your myFuture shortlist.", shortlisted };
+    return row;
+  }
+
+  async function toggleShortlistJob(tabId, postingId, board) {
+    const row = await boardRow(tabId, postingId, board, true);
+    if (!row) throw new Error("This posting is no longer listed on myFuture.");
+    return { message: row.shortlisted ? "Added to your myFuture shortlist." : "Removed from your myFuture shortlist.", shortlisted: row.shortlisted };
+  }
+
+  async function postingStatus(tabId, postingId, board) {
+    const row = await boardRow(tabId, postingId, board, false);
+    return row ? { found: true, shortlisted: row.shortlisted, appStatus: row.appStatus || "", submitted: SUBMITTED.test(row.appStatus || "") }
+      : { found: false };
   }
 
   // Opens the posting itself (myFuture's view page) in a new tab.
@@ -600,6 +615,7 @@
       BRIDGE_REFRESH: () => syncMyFuture(message.tabId),
       BRIDGE_SYNC: () => syncMyFuture(message.tabId),
       BRIDGE_SHORTLIST: () => toggleShortlistJob(message.tabId, String(message.postingId), message.board),
+      BRIDGE_POSTING_STATUS: () => postingStatus(message.tabId, String(message.postingId), message.board),
       BRIDGE_OPEN_POSTING: () => openPostingTab(message.item),
       BRIDGE_REQUEST_PREP: () => requestPrep(message.item),
       BRIDGE_FORGET: () => forget(String(message.postingId)),
