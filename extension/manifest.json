@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAplPH57liqh5nez0my6dGdT3MJw0w/8F8cRqRoJQNC031SiLBc8YkrHUkJ4tcNjQAcmrGM39MWDDR9yGoYvkX9KiMyC+lHUyzd6NgSUg1HPilhwcb33E4ydrgUJ29/m7QfKbgURCpVH6QNvtZOlC2hTJwi6ioXDKUjzWySjdsfFB5+omswOGD6SJ4uv1Oq/38BFKyE0KyWx8dNJOTnXF9fo4k7bKp/En26yFIMCJsrSrN+CnCQuVQErDo7uNpWkpJ7sIbi0HqapEmhrAtbcDXj4jWJQaZSvJfWzlJI9Wjgfaxxgh4RZynQBcn7RiVITFiiYKCKiRaywzdS3j62VPjZQIDAQAB",
   "name": "myFuture Toolkit",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Smart search, shortlist and apply helpers for McGill myFuture job postings, plus a local bridge for scripted document uploads.",
   "permissions": [
     "activeTab",
@@ -32,5 +32,16 @@
     "32": "assets/martlet-32.png",
     "48": "assets/martlet-48.png",
     "128": "assets/martlet-128.png"
-  }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://myfuture.mcgill.ca/*"
+      ],
+      "js": [
+        "apply-helper.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
 }

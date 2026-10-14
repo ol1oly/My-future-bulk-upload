@@ -123,6 +123,10 @@ def build_smart_search():
 
 
 def main():
+    # The extension ships its own copy of the shared iframe driver (extensions can't load files outside their folder).
+    (EXTENSION / "vendor").mkdir(exist_ok=True)
+    for name in ("frame-ops.js", "upload.js", "packages.js"):
+        (EXTENSION / "vendor" / name).write_text((SCRIPTS / name).read_text(encoding="utf-8"), encoding="utf-8")
     bundle = build_bundle()
     (UI / "panel.bundle.js").write_text(bundle, encoding="utf-8")
     b64 = base64.b64encode(bundle.encode("utf-8")).decode("ascii")

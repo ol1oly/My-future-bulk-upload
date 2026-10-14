@@ -226,7 +226,7 @@ button.link:hover { background: none; color: var(--red-dark); }
 .apps-progress { margin-top: 10px; color: var(--ink); font-size: 12px; font-weight: 600; }
 .apps-progress:empty { display: none; }
 .apps-progress.bad { color: var(--red-dark); }
-.apps-list { margin-top: 10px; max-height: 260px; overflow-y: auto; border-top: 1px solid var(--line); }
+.apps-list { margin-top: 10px; border-top: 1px solid var(--line); }
 .app-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: start; padding: 8px 0; border-bottom: 1px solid var(--line); }
 .app-row.applied { opacity: .6; }
 .app-main strong { display: block; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -242,3 +242,24 @@ button.link:hover { background: none; color: var(--red-dark); }
 .apps-find p, .apps-scan p { margin: 6px 0; font-size: 11px; }
 .apps-scan ol { margin: 0; padding-left: 18px; font-size: 11px; color: var(--ink); }
 .apps-find .secondary { margin-top: 0; }
+.apps-head .count { color: var(--muted); font-weight: 600; font-size: 12px; }
+.apps-head > span { display: flex; align-items: center; gap: 6px; }
+button.small { width: auto; margin: 0; padding: 4px 9px; font-size: 11px; }
+.filters { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 10px; }
+.filter { width: auto; margin: 0; padding: 3px 8px; border: 1px solid var(--line); border-radius: 999px; background: #fff; color: var(--ink); font-size: 11px; font-weight: 600; }
+.filter.on { background: var(--ink); border-color: var(--ink); color: #fff; }
+.apply-all { width: 100%; margin-top: 10px; }
+.row-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.row-actions button { width: auto; margin: 0; padding: 4px 9px; font-size: 11px; }
+.row-actions button.primary { background: var(--red); color: #fff; }
+.row-actions button.icon { padding: 3px 8px; font-size: 13px; line-height: 1; }
+.row-actions button.link { padding: 4px 4px; }
+.app-row { display: block; }
+.step.warn { border-color: #f0d58a; background: #fff4d6; color: #7a5600; }
+.apps-empty { margin: 10px 0 0; font-size: 12px; }
+.prepare { display: grid; gap: 4px; margin-top: 8px; padding: 8px; background: var(--surface); border-radius: 8px; }
+.prepare label { font-size: 11px; font-weight: 650; margin-top: 2px; }
+.prepare select { width: 100%; min-width: 0; padding: 5px 8px; font-size: 12px; }
+.prepare input[type=file] { font-size: 11px; }
+.prepare button { margin-top: 6px; }
+.apps-panel.claude { border-style: dashed; }

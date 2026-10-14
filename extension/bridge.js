@@ -15,6 +15,10 @@
   const progress = new Map(); // tabId -> latest progress line
   const APPS_KEY = "mstApps"; // postingId -> { title, organization, board, package, letterName, letter, package_, applied, error, ... }
 
+  const BOARD_KEY = "mfBoard";   // postingId -> { title, organization, board, shortlisted, appStatus, deadlineText, city }
+  const HIDDEN_KEY = "mstHidden"; // posting ids the student removed from "My postings"
+  const REQUESTS_KEY = "mstRequests"; // postings the student asked Claude to prepare
+
   async function loadApps() { return (await chrome.storage.local.get({ [APPS_KEY]: {} }))[APPS_KEY]; }
   async function updateApps(mutate) {
     const apps = await loadApps();
@@ -25,15 +29,30 @@
   }
   // Keep the store in step with plan.json: add new applications, keep progress of known ones.
   async function seedApps(plan) {
+    const { [HIDDEN_KEY]: hidden = [] } = await chrome.storage.local.get({ [HIDDEN_KEY]: [] });
     return updateApps((apps) => {
       for (const app of plan?.applications || []) {
         const id = String(app.postingId);
+        if (hidden.includes(id)) continue;
         apps[id] = { letter: app.letterPdf ? "todo" : "none", packageStatus: "todo", applied: false, ...(apps[id] || {}),
           postingId: id, title: app.title || "", organization: app.organization || "", board: app.board || "internshipscoop",
           package: app.package, letterName: app.letterName || "", inPlan: true };
       }
     });
   }
+
+  // tabId -> { postingId, title, organization, package } for tabs the extension opened to apply.
+  async function applyTabs() { return (await chrome.storage.session.get({ applyTabs: {} })).applyTabs; }
+  async function setApplyTab(tabId, context) {
+    const tabs = await applyTabs();
+    if (context) tabs[tabId] = context; else delete tabs[tabId];
+    await chrome.storage.session.set({ applyTabs: tabs });
+  }
+  chrome.tabs.onCreated.addListener(async (tab) => {
+    const tabs = await applyTabs();
+    if (tab.openerTabId && tabs[tab.openerTabId]) await setApplyTab(tab.id, tabs[tab.openerTabId]);
+  });
+  chrome.tabs.onRemoved.addListener((tabId) => { setApplyTab(tabId, null); });
 
   async function host(message) {
     const reply = await chrome.runtime.sendNativeMessage(HOST, message);
@@ -47,7 +66,9 @@
   }
 
   const ownFile = async (path) => (await fetch(chrome.runtime.getURL(path))).text();
-  const script = async (name) => (await host({ cmd: "readScript", name })).source;
+  const script = async (name) => {
+    try { return await ownFile(`vendor/${name}`); } catch (error) { return (await host({ cmd: "readScript", name })).source; }
+  };
 
   async function inPage(tabId, func, args = []) {
     const [entry] = await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", func, args });
@@ -56,7 +77,7 @@
 
   // Loads frame-ops.js into the page (once) and returns nothing; later calls use window.__mfFrame.
   async function ensureFrameOps(tabId) {
-    const source = await script("frame-ops.js");
+    const source = await ownFile("vendor/frame-ops.js"); // bundled copy of scripts/frame-ops.js (works without the bridge)
     await inPage(tabId, (src) => { if (!window.__mfFrame) (0, eval)(src); }, [source]);
   }
 
@@ -240,6 +261,7 @@
     if (!clicked) throw new Error("Not signed in to myFuture (postings page not found)");
     await listLoaded;
     await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: "MAIN", files: ["lib/jobs.js", "orbis-board.js"] });
+    await setApplyTab(tab.id, { postingId: String(app.postingId), title: app.title || "", organization: app.organization || "", package: app.package || "" });
     const formLoaded = waitTab(tab.id);
     const found = await inPage(tab.id, async (id) => {
       const rows = await __orbisBoard.listAll();
@@ -248,13 +270,8 @@
       return true;
     }, [app.postingId]);
     if (!found) { await chrome.tabs.remove(tab.id); throw new Error(`posting ${app.postingId} is no longer listed`); }
-    await formLoaded;
-    await inPage(tab.id, (packageName, title) => {
-      const bar = document.createElement("div");
-      bar.style.cssText = "position:sticky;top:0;z-index:2147483000;background:#ed1b2f;color:#fff;font:600 15px system-ui,sans-serif;padding:10px 16px";
-      bar.textContent = packageName ? `myFuture Toolkit: choose the package "${packageName}" for ${title}, review, then submit.` : `myFuture Toolkit: ${title} — choose your documents, review, then submit.`;
-      document.body.prepend(bar);
-    }, [app.package || "", app.title || app.postingId]);
+    await setApplyTab(tab.id, { postingId: String(app.postingId), title: app.title || "", organization: app.organization || "", package: app.package || "" });
+    await formLoaded; // apply-helper.js (content script) shows the banner and pre-selects the package on every page
     return tab;
   }
 
@@ -268,10 +285,10 @@
   }
 
   // Batch: one application form per ready posting, each in its own tab, one after another.
-  async function openForms(tabId, postingIds) {
+  async function openForms(tabId, postingIds, items) {
     const store = await loadApps();
-    const targets = (postingIds?.length ? postingIds : Object.keys(store)).map(String)
-      .map((id) => store[id]).filter((app) => app && !app.applied && app.packageStatus === "done");
+    const targets = items?.length ? items
+      : (postingIds?.length ? postingIds : Object.keys(store)).map(String).map((id) => store[id]).filter((app) => app && !app.applied && app.packageStatus === "done");
     if (!targets.length) throw new Error("No prepared application is waiting (run Prepare first).");
     const opened = [], failed = [];
     for (const [index, app] of targets.entries()) {
@@ -279,59 +296,169 @@
       try {
         const tab = await openFormTab(app, { active: index === 0 });
         opened.push(app.postingId);
-        await updateApps((s) => { s[app.postingId].formOpenedAt = new Date().toISOString(); s[app.postingId].formTabId = tab.id; });
+        await updateApps((s) => { if (s[app.postingId]) { s[app.postingId].formOpenedAt = new Date().toISOString(); s[app.postingId].formTabId = tab.id; } });
       } catch (error) {
         failed.push({ postingId: app.postingId, error: error.message || String(error) });
-        await updateApps((s) => { s[app.postingId].error = error.message || String(error); });
+        await updateApps((s) => { if (s[app.postingId]) s[app.postingId].error = error.message || String(error); });
       }
     }
-    const message = `Opened ${opened.length} application form(s)${failed.length ? `, ${failed.length} failed` : ""}. In each tab, pick the named package and submit; then press Refresh status.`;
+    const message = failed.length && !opened.length ? `Could not open the form: ${failed[0].error}`
+      : `Opened ${opened.length} application form(s)${failed.length ? `, ${failed.length} failed` : ""}. In each tab, choose your documents (or the named package) and submit; then press Sync.`;
     note(tabId, message);
     return { message, opened, failed };
   }
 
-  // Reads "Application Submitted" from each board's list and marks those applications as applied.
-  async function refreshStatus(tabId) {
-    const store = await loadApps();
-    const boards = [...new Set(Object.values(store).map((app) => app.board || "internshipscoop"))];
-    if (!boards.length) return { message: "No applications tracked yet." };
+  const SUBMITTED = /submitted|soumise|envoy/i;
+
+  async function loadBoardIntoFrame(tabId, board, engine) {
+    return inPage(tabId, async (path, sources) => {
+      await window.__mfFrame.openBoard(path);
+      const w = window.__mfFrame.frameWindow();
+      for (const src of sources) w.eval(src);
+      return (await w.__orbisBoard.listAll()).map((row) => ({ id: row.id, title: row.title, organization: row.organization, city: row.city,
+        deadlineText: row.deadlineText, appStatus: row.appStatus, shortlisted: row.shortlisted, canApply: row.canApply }));
+    }, [BOARDS[board], engine]);
+  }
+
+  // Reads both boards (list only, a few seconds): shortlist, started / submitted applications; and which planned
+  // letters and packages already exist on myFuture.
+  async function syncMyFuture(tabId) {
     await ensureFrameOps(tabId);
     const engine = [await ownFile("lib/jobs.js"), await ownFile("orbis-board.js")];
-    let applied = 0;
-    for (const board of boards) {
-      note(tabId, `Checking ${board} for submitted applications…`);
-      const rows = await inPage(tabId, async (path, sources) => {
-        await window.__mfFrame.openBoard(path);
-        const w = window.__mfFrame.frameWindow();
-        for (const src of sources) w.eval(src);
-        return (await w.__orbisBoard.listAll()).map((row) => ({ id: row.id, appStatus: row.appStatus, shortlisted: row.shortlisted }));
-      }, [BOARDS[board], engine]);
-      await updateApps((s) => {
-        for (const app of Object.values(s)) {
-          if ((app.board || "internshipscoop") !== board) continue;
-          const row = rows.find((r) => r.id === app.postingId);
-          if (!row) { app.listed = false; continue; }
-          app.listed = true;
-          app.appStatus = row.appStatus || "";
-          app.applied = /submitted|soumise/i.test(row.appStatus || "");
-          if (app.applied) applied += 1;
-        }
-      });
+    const snapshot = {};
+    for (const board of Object.keys(BOARDS)) {
+      note(tabId, `Reading ${board === "career" ? "General Jobs" : "Internship / Co-op"} postings…`);
+      for (const row of await loadBoardIntoFrame(tabId, board, engine)) snapshot[row.id] = { ...row, board };
     }
+    await chrome.storage.local.set({ [BOARD_KEY]: snapshot, mfSyncedAt: new Date().toISOString() });
     note(tabId, "Checking your cover letters and packages…");
     const [letterDocs, packageDocs] = await inPage(tabId, async () => [
       await window.__mfFrame.listDocs("Cover Letter"), await window.__mfFrame.listDocs("Application Packages")]);
-    let ready = 0;
+    const [cvDocs, transcriptDocs] = await inPage(tabId, async () => [
+      await window.__mfFrame.listDocs("CV/Resume"), await window.__mfFrame.listDocs("Unofficial Transcript")]);
+    await chrome.storage.local.set({ mfDocs: { cvs: cvDocs.map((d) => d.name), transcripts: transcriptDocs.map((d) => d.name),
+      coverLetters: letterDocs.map((d) => d.name), packages: packageDocs.map((d) => d.name) } });
+    let submitted = 0, started = 0, ready = 0;
     await updateApps((s) => {
       for (const app of Object.values(s)) {
+        const row = snapshot[app.postingId];
+        app.listed = Boolean(row);
+        app.appStatus = row?.appStatus || "";
+        app.applied = SUBMITTED.test(app.appStatus);
+        app.started = Boolean(app.appStatus) && !app.applied;
         if (app.letterName && letterDocs.some((d) => d.name === app.letterName)) app.letter = "done";
         if (app.package && packageDocs.some((d) => d.name === app.package)) { app.packageStatus = "done"; delete app.error; }
+        if (app.applied) submitted += 1; else if (app.started) started += 1;
         if (app.packageStatus === "done" && !app.applied) ready += 1;
       }
     });
-    const message = `${applied} application(s) submitted, ${ready} ready to apply.`;
+    const shortlisted = Object.values(snapshot).filter((r) => r.shortlisted).length;
+    const message = `Synced: ${shortlisted} shortlisted, ${submitted} submitted, ${started} started, ${ready} ready to apply.`;
     note(tabId, message);
     return { message };
+  }
+
+  async function toggleShortlistJob(tabId, postingId, board) {
+    await ensureFrameOps(tabId);
+    const engine = [await ownFile("lib/jobs.js"), await ownFile("orbis-board.js")];
+    const shortlisted = await inPage(tabId, async (path, sources, id) => {
+      await window.__mfFrame.openBoard(path);
+      const w = window.__mfFrame.frameWindow();
+      for (const src of sources) w.eval(src);
+      const rows = await w.__orbisBoard.listAll();
+      const row = rows.find((r) => r.id === String(id));
+      if (!row) throw new Error("This posting is no longer listed on myFuture.");
+      await w.__orbisBoard.toggleShortlist(String(id));
+      return !row.shortlisted;
+    }, [BOARDS[board || "internshipscoop"], engine, postingId]);
+    const { [BOARD_KEY]: snapshot = {} } = await chrome.storage.local.get({ [BOARD_KEY]: {} });
+    if (snapshot[postingId]) snapshot[postingId].shortlisted = shortlisted;
+    await chrome.storage.local.set({ [BOARD_KEY]: snapshot });
+    chrome.runtime.sendMessage({ type: "BRIDGE_APPS" }).catch(() => {});
+    return { message: shortlisted ? "Added to your myFuture shortlist." : "Removed from your myFuture shortlist.", shortlisted };
+  }
+
+  // Opens the posting itself (myFuture's view page) in a new tab.
+  async function openPostingTab(item) {
+    const tab = await chrome.tabs.create({ url: `https://myfuture.mcgill.ca${BOARDS[item.board || "internshipscoop"]}`, active: true });
+    await waitTab(tab.id);
+    const listLoaded = waitTab(tab.id);
+    const clicked = await inPage(tab.id, () => {
+      const button = [...document.querySelectorAll("a,button")].find((node) => node.innerText.trim() === "View all available postings");
+      if (button) button.click();
+      return Boolean(button);
+    });
+    if (!clicked) throw new Error("Not signed in to myFuture (postings page not found)");
+    await listLoaded;
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: "MAIN", files: ["lib/jobs.js", "orbis-board.js"] });
+    const ok = await inPage(tab.id, async (id) => {
+      const rows = await __orbisBoard.listAll();
+      if (!rows.some((row) => row.id === String(id))) return false;
+      __orbisBoard.openHere(String(id));
+      return true;
+    }, [item.postingId]);
+    if (!ok) throw new Error("This posting is no longer listed on myFuture.");
+    return { message: "Opened the posting in a new tab." };
+  }
+
+  // Prepare one application from the popup, no Claude needed: optional cover letter (existing name or a PDF the
+  // student picked), then one package "<cv base>_<Org>_<date>". Records it under My postings as ready to apply.
+  async function prepareOne(tabId, item, choice) {
+    await ensureFrameOps(tabId);
+    const day = new Date().toISOString().slice(0, 10);
+    const org = String(item.organization || "Job").replace(/[^A-Za-z0-9]+/g, "").slice(0, 24) || "Job";
+    const base = String(choice.cv).replace(DATED, "");
+    let packageName = `${base}_${org}_${day}`;
+    const docs = await inPage(tabId, async () => [await window.__mfFrame.listDocs("Application Packages"), await window.__mfFrame.listDocs("Cover Letter")]);
+    for (let n = 2; docs[0].some((d) => d.name === packageName); n += 1) packageName = `${base}_${org}${n}_${day}`;
+    let letterName = choice.coverLetter || "";
+    if (choice.letterFile) {
+      letterName = `cl_${org}_${day}`;
+      for (let n = 2; docs[1].some((d) => d.name === letterName); n += 1) letterName = `cl_${org}${n}_${day}`;
+      note(tabId, "Uploading your cover letter…");
+      const upload = await inPage(tabId, async (src, doc, file) => {
+        const binary = atob(file.base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+        return window.__mfFrame.upload(src, [doc], [new File([bytes], file.name, { type: "application/pdf" })], false);
+      }, [await script("upload.js"), { file: choice.letterFile.name, name: letterName, type: "13" }, choice.letterFile]);
+      if (!upload?.ok) throw new Error("The cover letter could not be uploaded.");
+    }
+    note(tabId, `Creating package ${packageName}…`);
+    const created = await inPage(tabId, (src, list) => window.__mfFrame.packages(src, list, false),
+      [await script("packages.js"), [{ name: packageName, cv: choice.cv, transcript: choice.transcript || null, coverLetter: letterName || null }]]);
+    if (!created?.ok) throw new Error(`The package could not be created (${created?.results?.[0]?.status || "unknown error"}).`);
+    await updateApps((s) => {
+      const id = String(item.postingId);
+      s[id] = { ...(s[id] || {}), postingId: id, title: item.title || "", organization: item.organization || "", board: item.board || "internshipscoop",
+        package: packageName, packageStatus: "done", letterName, letter: letterName ? "done" : "none", cvUsed: choice.cv, transcriptUsed: choice.transcript || "",
+        applied: false, inPlan: true, source: "extension" };
+    });
+    const message = `Package ${packageName} is ready. Press Apply to open the form.`;
+    note(tabId, message);
+    return { message, packageName };
+  }
+
+  // "Ask Claude to prepare": remembered in the extension and written to ~/.mst/out/requests.json for Claude.
+  async function requestPrep(item) {
+    const { [REQUESTS_KEY]: requests = [] } = await chrome.storage.local.get({ [REQUESTS_KEY]: [] });
+    if (!requests.some((r) => r.postingId === item.postingId)) requests.push({ ...item, requestedAt: new Date().toISOString() });
+    await chrome.storage.local.set({ [REQUESTS_KEY]: requests });
+    try {
+      await host({ cmd: "writeResult", name: "requests", data: requests });
+      return { message: `Saved. Ask Claude: “prepare my requested applications” (${requests.length} waiting).` };
+    } catch (error) {
+      return { message: "Saved in the extension, but the local bridge isn't installed, so Claude can't see it yet." };
+    }
+  }
+
+  async function forget(postingId) {
+    const { [HIDDEN_KEY]: hidden = [], jobTracker = {} } = await chrome.storage.local.get({ [HIDDEN_KEY]: [], jobTracker: {} });
+    if (!hidden.includes(postingId)) hidden.push(postingId);
+    delete jobTracker[`p${postingId}`];
+    await chrome.storage.local.set({ [HIDDEN_KEY]: hidden, jobTracker });
+    await updateApps((s) => { delete s[postingId]; });
+    return { message: "Removed from My postings." };
   }
 
   async function status() {
@@ -345,16 +472,25 @@
     }
   }
 
-  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message?.type === "APPLY_CONTEXT") {
+      applyTabs().then((tabs) => sendResponse(sender.tab ? tabs[sender.tab.id] || null : null));
+      return true;
+    }
     const jobs = {
       BRIDGE_STATUS: () => status(),
       BRIDGE_SCAN: () => scanBoard(message.tabId, message.board, message.prefs),
       BRIDGE_CHECK_PLAN: () => runPlan(message.tabId, { dryRun: true }),
       BRIDGE_RUN_PLAN: () => runPlan(message.tabId),
       BRIDGE_PROBE: () => probeApply(message.tabId, message.board, message.postingId),
-      BRIDGE_OPEN_FORMS: () => openForms(message.tabId, message.postingIds),
-      BRIDGE_REFRESH: () => refreshStatus(message.tabId),
-      BRIDGE_FORGET: () => updateApps((s) => { delete s[String(message.postingId)]; }).then(() => ({}))
+      BRIDGE_OPEN_FORMS: () => openForms(message.tabId, message.postingIds, message.items),
+      BRIDGE_REFRESH: () => syncMyFuture(message.tabId),
+      BRIDGE_SYNC: () => syncMyFuture(message.tabId),
+      BRIDGE_SHORTLIST: () => toggleShortlistJob(message.tabId, String(message.postingId), message.board),
+      BRIDGE_OPEN_POSTING: () => openPostingTab(message.item),
+      BRIDGE_REQUEST_PREP: () => requestPrep(message.item),
+      BRIDGE_FORGET: () => forget(String(message.postingId)),
+      BRIDGE_PREPARE_ONE: () => prepareOne(message.tabId, message.item, message.choice)
     };
     const job = jobs[message?.type];
     if (!job) return undefined;

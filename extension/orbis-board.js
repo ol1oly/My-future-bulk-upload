@@ -169,6 +169,7 @@
     apply: (id) => submitForm(params.get(String(id))?.apply),
     // Same form in THIS tab (used by the bridge in a tab it opened, so no pop-up permission is needed).
     applyHere: (id) => submitForm(params.get(String(id))?.apply, "_self"),
+    openHere: (id) => submitForm(params.get(String(id))?.view, "_self"),
     toggleShortlist: (id) => toggle("saveFavoritePosting", id),
     notInterested: (id) => toggle("toggleBlacklistPosting", id)
   };

@@ -305,11 +305,16 @@
     return { score, hits: hits.slice(0, 8), excluded };
   }
 
+  // myFuture's App Status column: "Application Submitted" once sent; other values (e.g. a started application) are not.
+  function isSubmitted(appStatus) {
+    return /submitted|soumise|envoy/i.test(String(appStatus || ""));
+  }
+
   // meta: { appStatus, shortlisted } from the postings list. Returns "" when the posting passes, else the reason.
   function filterPosting(parsed, meta = {}, prefs = DEFAULT_PREFS, now = new Date()) {
     const f = parsed.fields;
     const fit = parsed.fit || scorePosting(parsed, prefs);
-    if (prefs.hideApplied && meta.appStatus) return "applied";
+    if (prefs.hideApplied && isSubmitted(meta.appStatus)) return "applied";
     if (prefs.onlyShortlisted && !meta.shortlisted) return "not shortlisted";
     if (prefs.hideShortlisted && meta.shortlisted) return "shortlisted";
     const days = daysUntil(parsed.deadline, now);
@@ -358,6 +363,6 @@
 
   return {
     FIELD_ALIASES, fieldForLabel, normalizeLabel, detectLanguage, recommendTrack, parseDocuments, parseMethod, parseDate, daysUntil,
-    parsePosting, isLikelyPosting, jobFileStem, mailtoFor, DEFAULT_PREFS, scorePosting, filterPosting, trackerRow, trackerCsv, TRACKER_COLUMNS, slug
+    parsePosting, isLikelyPosting, jobFileStem, mailtoFor, DEFAULT_PREFS, scorePosting, filterPosting, isSubmitted, trackerRow, trackerCsv, TRACKER_COLUMNS, slug
   };
 });

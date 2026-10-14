@@ -76,7 +76,7 @@
       "New": "Nouveau",
       "★ Shortlisted": "★ Présélectionnée",
       "☆ Shortlist": "☆ Présélectionner",
-      "Apply": "Postuler",
+      "Apply": "Postuler", "Continue": "Continuer", "Submitted": "Soumise", "Started": "Commencée",
       "Opens myFuture's application form in a new tab": "Ouvre le formulaire de candidature de myFuture dans un nouvel onglet",
       "Employer site ↗": "Site de l'employeur ↗",
       "Save card": "Enregistrer la fiche",
@@ -338,12 +338,12 @@
       el("span", { class: "mst-chip", textContent: `CV ${p.cv}` }),
       f.jobLanguage ? el("span", { class: "mst-chip", textContent: f.jobLanguage.replace(/\s+/g, " + ") }) : null,
       r.isNew ? el("span", { class: "mst-chip", textContent: t("New") }) : null,
-      r.appStatus ? el("span", { class: "mst-chip warn", textContent: r.appStatus }) : null,
+      r.appStatus ? el("span", { class: "mst-chip warn", textContent: J.isSubmitted(r.appStatus) ? t("Submitted") : `${t("Started")}: ${r.appStatus}` }) : null,
       ...p.fit.hits.slice(0, 5).map((hit) => el("span", { class: "mst-chip hit", textContent: hit }))
     ];
     const actions = [
       el("button", { type: "button", class: r.shortlisted ? "on" : "", textContent: t(r.shortlisted ? "★ Shortlisted" : "☆ Shortlist"), onclick: (event) => toggleShortlist(p, event.currentTarget) }),
-      mcgill && r.canApply && !r.appStatus ? el("button", { type: "button", class: "primary", textContent: t("Apply"), title: t("Opens myFuture's application form in a new tab"), onclick: () => board.apply(r.id) }) : null,
+      mcgill && r.canApply && !J.isSubmitted(r.appStatus) ? el("button", { type: "button", class: "primary", textContent: t(r.appStatus ? "Continue" : "Apply"), title: t("Opens myFuture's application form in a new tab"), onclick: () => board.apply(r.id) }) : null,
       !mcgill && p.apply.urls[0] ? el("a", { class: "mst-link", href: p.apply.urls[0], target: "_blank", rel: "noopener", textContent: t("Employer site ↗") }) : null,
       el("button", { type: "button", textContent: t("Save card"), onclick: () => saveCards([p]) }),
       el("button", { type: "button", textContent: t("Not interested"), title: t("Hide from myFuture lists (myFuture's own Not Interested list)"), onclick: () => notInterested(p) })

@@ -17,51 +17,44 @@
       </header>
 
       <button id="smartSearch" type="button" class="smart-search" hidden>Smart search all postings</button>
-      <section id="bridgePanel" class="apps-panel" hidden>
+      <section id="jobPanel" class="job-panel" hidden aria-live="polite"></section>
+      <section id="empty" class="empty" hidden></section>
+
+      <section id="postingsPanel" class="apps-panel" hidden>
         <div class="apps-head">
-          <strong>Applications</strong>
-          <span id="appsSummary"></span>
+          <strong>My postings <span id="postingsCount" class="count"></span></strong>
+          <span><span id="postingsSynced"></span> <button id="syncButton" type="button" class="secondary small" title="Read your myFuture shortlist, applications, CVs and packages">Sync</button></span>
         </div>
-        <p id="bridgeStatus" class="apps-intro">Checking local bridge…</p>
-        <ol id="appsSteps" class="apps-steps" hidden>
-          <li>
-            <button id="bridgeCheck" type="button" class="secondary">1 · Check</button>
-            <span>Tests everything with myFuture: finds your newest CV and transcript, checks the letters and packages. Saves nothing.</span>
-          </li>
-          <li>
-            <button id="bridgeRun" type="button" class="secondary">2 · Prepare</button>
-            <span id="prepareHint">Uploads the cover letters and creates one application package per posting on myFuture. Submits nothing.</span>
-          </li>
-          <li>
-            <button id="bridgeApplyAll" type="button">3 · Apply to all ready</button>
-            <span>Opens myFuture's application form for every prepared posting, one tab each, with the package to choose shown at the top. You review and submit in each tab.</span>
-          </li>
-          <li>
-            <button id="bridgeRefresh" type="button" class="secondary">Refresh status</button>
-            <span>Reads which postings now show “Application Submitted” on myFuture.</span>
-          </li>
-        </ol>
-        <p id="bridgeProgress" class="apps-progress" aria-live="polite"></p>
-        <div id="appsList" class="apps-list"></div>
+        <p class="apps-intro">Everything you're working on: postings you saved or shortlisted and applications in progress.
+          <b>Prepare…</b> builds a package from your CV, transcript and cover letter; <b>Apply</b> opens myFuture's form with it
+          selected. You always submit in myFuture.</p>
+        <div id="postingsFilters" class="filters"></div>
+        <button id="applyAll" type="button" class="apply-all">Apply to all ready (0)</button>
+        <p id="postingsProgress" class="apps-progress" aria-live="polite"></p>
+        <div id="postingsList" class="apps-list"></div>
+      </section>
+
+      <section id="claudePanel" class="apps-panel claude" hidden>
+        <strong>From Claude</strong>
+        <p id="claudeStatus" class="apps-intro"></p>
+        <div id="claudeSteps" class="job-actions" hidden>
+          <button id="claudeCheck" type="button" class="secondary">Check (saves nothing)</button>
+          <button id="claudeRun" type="button" class="secondary">Prepare all</button>
+        </div>
         <details class="apps-find">
           <summary>Find postings for Claude</summary>
-          <p>Reads every posting on a board and saves it so Claude can pick matches for you. Same reading as Smart search.</p>
+          <p>Reads every posting on a board and saves it so Claude can pick matches for you.</p>
           <div class="job-actions">
-            <button id="bridgeScanCoop" type="button" class="secondary">Scan Internship/Co-op</button>
-            <button id="bridgeScanCareer" type="button" class="secondary">Scan General Jobs</button>
+            <button id="scanCoop" type="button" class="secondary">Scan Internship/Co-op</button>
+            <button id="scanCareer" type="button" class="secondary">Scan General Jobs</button>
           </div>
           <div id="scanResult" class="apps-scan"></div>
         </details>
       </section>
-      <section id="jobPanel" class="job-panel" hidden aria-live="polite"></section>
-      <section id="empty" class="empty" hidden></section>
-
-      <button id="trackerToggle" class="secondary tracker-toggle" type="button">Saved postings</button>
-      <section id="trackerPanel" class="tracker-panel" hidden aria-live="polite"></section>
     </main>
     <script src="lib/jobs.js"></script>
     <script src="popup-jobs.js"></script>
-    <script src="popup-bridge.js"></script>
+    <script src="popup-postings.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>
