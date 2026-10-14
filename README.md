@@ -1,5 +1,6 @@
 # myFuture bulk
 
+<<<<<<< HEAD
 Refresh your job-search documents on McGill **myFuture** (Orbis) in one pass: upload CVs, a transcript and
 cover letters, rebuild one application package per CV, and delete the older dated copies you made before.
 
@@ -82,3 +83,10 @@ entry picks the most recent file in a folder (handy for a transcript you re-down
 Check with myFuture (dry run) first — it changes nothing. Real runs ask before applying, and only remove old
 copies once every upload and package succeeded. Only names ending in a date are ever removed. Only PDFs upload;
 other files are refused with a message.
+=======
+Refresh your job-search documents on McGill **myFuture**: upload CVs, a transcript and
+cover letters, rebuild one application package per CV, and delete the older dated copies.
+
+## Safety
+Only PDFs upload
+>>>>>>> origin/main
