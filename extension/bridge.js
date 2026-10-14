@@ -451,15 +451,36 @@
   }
 
   // Claude (on this computer, through the bridge, with no tools) writes the one posting-specific sentence.
-  async function draftLetter(tabId, item) {
+  async function draftLetter(tabId, item, rewrite = {}) {
     note(tabId, "Reading the posting…");
     const details = await postingDetails(tabId, item);
-    const posting = { ...details, postingId: String(item.postingId), title: details.title || item.title, organization: details.organization || item.organization };
+    const posting = { ...details, postingId: String(item.postingId), title: details.title || item.title, organization: details.organization || item.organization,
+      feedback: rewrite.feedback || "", previous: rewrite.previous || "" };
     note(tabId, "Claude is writing the sentence for this posting…");
     const draft = await host({ cmd: "draftLetter", posting });
     note(tabId, draft.issues?.length ? `Review the letter: ${draft.issues.join("; ")}.` : "Review the letter, then create the package.");
     return { text: draft.text, style: draft.style, issues: draft.issues || [], model: draft.model, cv: details.cv, documents: details.documents,
-      posting: { ...posting, style: draft.style, description: undefined, qualifications: undefined } };
+      posting: { ...posting, style: draft.style, description: undefined, qualifications: undefined, feedback: undefined, previous: undefined } };
+  }
+
+  // Make the PDFs only (no upload): one Word session per chunk of up to 6 letters.
+  async function makeLetters(tabId, items) {
+    const results = [];
+    for (let i = 0; i < items.length; i += 6) {
+      const chunk = items.slice(i, i + 6);
+      note(tabId, `Making PDFs ${i + 1}-${i + chunk.length} of ${items.length} (Word starts once per group)…`);
+      const reply = await host({ cmd: "fillLetters", items: chunk.map((it) => ({ posting: { ...it.posting, postingId: String(it.postingId) }, text: it.text })) });
+      results.push(...reply.results);
+    }
+    const ok = results.filter((r) => r.ok).length;
+    const message = `${ok} of ${items.length} PDF(s) made${ok < items.length ? "; see the ones marked in red" : ""}. View them, then upload.`;
+    note(tabId, message);
+    return { message, results };
+  }
+
+  async function viewPath(path) {
+    const file = await host({ cmd: "readFile", path });
+    return viewFile({ name: file.name, base64: file.base64 });
   }
 
   // Find matches: read the board, rank by keywords (everyone); with Claude Code + a profile, Claude picks the best of the
@@ -523,10 +544,13 @@
     const docs = await inPage(tabId, async () => [await window.__mfFrame.listDocs("Application Packages"), await window.__mfFrame.listDocs("Cover Letter")]);
     for (let n = 2; docs[0].some((d) => d.name === packageName); n += 1) packageName = `${base}_${org}${n}_${day}`;
     let letterName = choice.coverLetter || "";
-    if (choice.claude?.text) {
-      note(tabId, "Making the cover letter PDF (Word, up to a minute)…");
-      const made = await host({ cmd: "fillLetter", posting: { ...choice.claude.posting, postingId: String(item.postingId) }, text: choice.claude.text });
-      const file = await host({ cmd: "readFile", path: made.pdf });
+    if (choice.claude?.pdf || choice.claude?.text) {
+      let pdf = choice.claude.pdf; // already made and viewed: upload exactly that file
+      if (!pdf) {
+        note(tabId, "Making the cover letter PDF (Word, up to a minute)…");
+        pdf = (await host({ cmd: "fillLetter", posting: { ...choice.claude.posting, postingId: String(item.postingId) }, text: choice.claude.text })).pdf;
+      }
+      const file = await host({ cmd: "readFile", path: pdf });
       choice.letterFile = { name: file.name, base64: file.base64 };
     }
     if (choice.letterFile) {
@@ -623,7 +647,9 @@
       BRIDGE_UNHIDE: () => unhideAll(),
       APPLY_DONE: () => setApplyTab(_sender?.tab?.id ?? message.tabId, null).then(() => ({})),
       BRIDGE_PREPARE_ONE: () => prepareOne(message.tabId, message.item, message.choice),
-      BRIDGE_DRAFT_LETTER: () => draftLetter(message.tabId, message.item),
+      BRIDGE_DRAFT_LETTER: () => draftLetter(message.tabId, message.item, { feedback: message.feedback, previous: message.previous }),
+      BRIDGE_MAKE_LETTERS: () => makeLetters(message.tabId, message.items),
+      BRIDGE_VIEW_PATH: () => viewPath(message.path),
       BRIDGE_RECOMMEND: () => recommend(message.tabId, message.item),
       BRIDGE_FIND_MATCHES: () => findMatches(message.tabId, message.board),
       BRIDGE_PREVIEW_LETTER: () => host({ cmd: "previewLetter", posting: message.posting, text: message.text }),

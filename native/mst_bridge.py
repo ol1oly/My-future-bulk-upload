@@ -255,6 +255,12 @@ def draft_letter(posting):
                   f"position at {posting.get('organization', '')}.\" in the letter.")
         key = "sentence"
 
+    if posting.get("feedback") and posting.get("previous"):
+        prompt += (f"\n\nThe student read this draft:\n{str(posting['previous'])[:4000]}\n"
+                   f"Rewrite it with this change (their words): {str(posting['feedback'])[:800]}")
+    elif posting.get("previous"):
+        prompt += f"\n\nWrite a different version from this earlier draft:\n{str(posting['previous'])[:4000]}"
+
     def ask(extra=""):
         answer = run_claude(system, prompt + extra, model=settings["model"])
         value = answer.get(key, "")
@@ -276,28 +282,54 @@ def draft_letter(posting):
     return {"text": text, "style": style, "issues": found, "model": settings["model"]}
 
 
-def fill_letter(posting, text):
-    if not letter_support()["word"]:
-        raise RuntimeError("Filling Word templates needs Windows with Microsoft Word")
-    cfg = jobs_config()
+def letter_job(cfg, posting, text):
     template = body_template(cfg, posting) if posting.get("style") == "free" else template_for(cfg, posting.get("template"))
     org = re.sub(r"[^A-Za-z0-9]+", "", str(posting.get("organization") or "Job"))[:24] or "Job"
     folder = cfg["applications"] / f"{dt.date.today().isoformat()}_{org}_{re.sub(r'[^0-9]', '', str(posting.get('postingId', '')))}"
     folder.mkdir(parents=True, exist_ok=True)
-    (folder / "slots.json").write_text(json.dumps(slots_for(posting, text), ensure_ascii=False, indent=1), encoding="utf-8")
-    stem = folder / f"Cover_Letter_{org}"
-    result = subprocess.run(
-        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(REPO / "apply" / "fill_letter.ps1"),
-         "-Template", str(template), "-OutStem", str(stem), "-SlotsJson", str(folder / "slots.json")],
-        capture_output=True, text=True, timeout=240)
-    report = json.loads(result.stdout.strip().splitlines()[-1]) if result.stdout.strip() else {"ok": False, "error": result.stderr[:200]}
-    if not report.get("ok"):
-        raise RuntimeError(f"The letter did not pass the checks ({report.get('error') or report})")
+    slots = folder / "slots.json"
+    slots.write_text(json.dumps(slots_for(posting, text), ensure_ascii=False, indent=1), encoding="utf-8")
+    return {"id": str(posting.get("postingId", "")), "template": str(template), "outStem": str(folder / f"Cover_Letter_{org}"), "slotsJson": str(slots)}
+
+
+def remember_generated(paths):
     generated = load_json(GENERATED, []) or []
-    generated.append(str(Path(report["pdf"]).resolve()))
+    generated.extend(str(Path(p).resolve()) for p in paths)
     GENERATED.parent.mkdir(parents=True, exist_ok=True)
-    GENERATED.write_text(json.dumps(generated[-200:], indent=1), encoding="utf-8")
-    return {"pdf": report["pdf"], "pages": report.get("pages")}
+    GENERATED.write_text(json.dumps(generated[-300:], indent=1), encoding="utf-8")
+
+
+def fill_letters(items):
+    """Many letters, one Word session. items: [{posting, text}] -> [{postingId, ok, pdf, pages, error}]."""
+    if not letter_support()["word"]:
+        raise RuntimeError("Filling Word templates needs Windows with Microsoft Word")
+    cfg = jobs_config()
+    jobs, results = [], []
+    for item in items:
+        try:
+            jobs.append(letter_job(cfg, item.get("posting") or {}, item.get("text", "")))
+        except Exception as error:  # e.g. missing template: report for this letter only
+            results.append({"postingId": str((item.get("posting") or {}).get("postingId", "")), "ok": False, "error": str(error)})
+    if jobs:
+        batch = HOME / "fill-batch.json"
+        batch.write_text(json.dumps(jobs, ensure_ascii=False), encoding="utf-8")
+        run = subprocess.run(
+            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(REPO / "apply" / "fill_letter.ps1"), "-BatchJson", str(batch)],
+            capture_output=True, text=True, timeout=90 + 45 * len(jobs))
+        lines = [json.loads(l) for l in run.stdout.splitlines() if l.strip().startswith("{")]
+        by_id = {l.get("id"): l for l in lines}
+        for job in jobs:
+            report = by_id.get(job["id"]) or {"ok": False, "error": (lines[-1].get("error") if lines else run.stderr[:200]) or "Word did not answer"}
+            results.append({"postingId": job["id"], "ok": bool(report.get("ok")), "pdf": report.get("pdf"), "pages": report.get("pages"), "error": report.get("error")})
+    remember_generated(r["pdf"] for r in results if r.get("ok") and r.get("pdf"))
+    return results
+
+
+def fill_letter(posting, text):
+    result = fill_letters([{"posting": posting, "text": text}])[0]
+    if not result["ok"]:
+        raise RuntimeError(f"The letter did not pass the checks ({result.get('error')})")
+    return {"pdf": result["pdf"], "pages": result.get("pages")}
 
 
 def letter_settings_reply():
@@ -330,6 +362,8 @@ def handle(msg):
         return {"ok": True, "picks": rank_postings(msg.get("candidates") or [])}
     if cmd == "previewLetter":
         return {"ok": True, "text": preview_letter(msg.get("posting") or {}, msg.get("text", msg.get("sentence", "")))}
+    if cmd == "fillLetters":
+        return {"ok": True, "results": fill_letters(msg.get("items") or [])}
     if cmd == "fillLetter":
         return {"ok": True, **fill_letter(msg.get("posting") or {}, msg.get("text", msg.get("sentence", "")))}
     if cmd == "getPlan":

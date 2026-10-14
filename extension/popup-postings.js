@@ -158,7 +158,7 @@
     const letter = select(newest(docs.coverLetters), extra);
     const why = el("small", { className: "recommend", textContent: state.rec ? "" : "Reading the posting to recommend a CV…" });
     const file = el("input", { type: "file", accept: "application/pdf,.pdf", hidden: true });
-    const write = el("button", { type: "button", className: "secondary", textContent: state.drafted ? "Write again" : "Write with Claude", hidden: true });
+    const write = el("button", { type: "button", className: "secondary", textContent: state.drafted ? "Rewrite" : "Write with Claude", hidden: true });
     const sentence = el("textarea", { hidden: true, rows: 4, value: state.sentence || "", placeholder: "Claude's sentence about this posting appears here; edit it if you like." });
     const hint = el("small", { hidden: true, textContent: "Claude writes from your facts and your cover letter settings. Takes ~10 s, then ~1 min to make the PDF." });
     const previewBtn = el("button", { type: "button", className: "link", textContent: "Preview the whole letter", hidden: true });
@@ -182,6 +182,7 @@
     });
     file.addEventListener("change", () => { filePreview.hidden = !file.files[0]; });
 
+    let showPdfButtons = () => {}; // replaced once the PDF buttons exist
     const sync = () => {
       file.hidden = letter.value !== "__upload";
       write.hidden = hint.hidden = letter.value !== "__claude";
@@ -189,6 +190,7 @@
       previewBtn.hidden = sentence.hidden;
       if (previewBtn.hidden) previewBox.hidden = true;
       filePreview.hidden = file.hidden || !file.files[0];
+      showPdfButtons();
     };
     const remember = () => { state.cv = cv.value; state.transcript = transcript.value; state.letter = letter.value; state.sentence = sentence.value; };
 
@@ -222,24 +224,52 @@
 
     for (const control of [cv, transcript, letter]) control.addEventListener("change", () => { remember(); sync(); });
     sentence.addEventListener("input", remember);
-    write.addEventListener("click", async () => {
+    // Rewrite with an optional change, make the PDF, look at it; upload only when happy.
+    const change = el("input", { type: "text", hidden: true, placeholder: "What to change (optional), e.g. shorter, mention my game projects" });
+    const makePdf = el("button", { type: "button", className: "secondary", textContent: "Make PDF", hidden: true });
+    const viewPdf = el("button", { type: "button", className: "link", textContent: "View PDF", hidden: true });
+    showPdfButtons = () => {
+      const drafted = letter.value === "__claude" && Boolean(state.drafted);
+      change.hidden = makePdf.hidden = !drafted;
+      viewPdf.hidden = !(drafted && state.pdf && state.pdfText === sentence.value);
+    };
+    async function draft(feedback = "") {
       write.disabled = true; write.textContent = "Claude is writing…";
       try {
-        const reply = await send({ type: "BRIDGE_DRAFT_LETTER", item: ref });
+        const reply = await send({ type: "BRIDGE_DRAFT_LETTER", item: ref, feedback, previous: state.drafted ? sentence.value : "" });
         if (!reply?.ok) { say(`Claude couldn't write it: ${reply?.error || "no answer"}`, true); return; }
         state.drafted = reply.posting;
         state.sentence = sentence.value = reply.text;
+        state.pdf = "";
+        change.value = "";
         sentence.rows = reply.style === "free" ? 12 : 4;
-        say(reply.issues?.length ? `Check before using: ${reply.issues.join("; ")}.` : "Read the letter text below, edit if needed, then press Create package.", Boolean(reply.issues?.length));
-      } finally { write.disabled = false; write.textContent = "Write again"; sync(); }
+        say(reply.issues?.length ? `Check before using: ${reply.issues.join("; ")}.` : "Read it, edit or rewrite it, then Make PDF to see the final letter.", Boolean(reply.issues?.length));
+      } finally { write.disabled = false; write.textContent = "Rewrite"; sync(); showPdfButtons(); }
+    }
+    write.addEventListener("click", () => draft(change.value.trim()));
+    change.addEventListener("keydown", (e) => { if (e.key === "Enter") draft(change.value.trim()); });
+    sentence.addEventListener("input", showPdfButtons);
+    makePdf.addEventListener("click", async () => {
+      makePdf.disabled = true; makePdf.textContent = "Making PDF…";
+      try {
+        const reply = await send({ type: "BRIDGE_MAKE_LETTERS", items: [{ postingId: ref.postingId, posting: state.drafted, text: sentence.value }] });
+        const result = reply?.results?.[0];
+        if (!reply?.ok || !result?.ok) { say(`The PDF failed: ${result?.error || reply?.error || "no answer"}`, true); return; }
+        state.pdf = result.pdf;
+        state.pdfText = sentence.value;
+        say("PDF ready. View it; rewrite if needed, or upload it.");
+        await send({ type: "BRIDGE_VIEW_PATH", path: state.pdf });
+      } finally { makePdf.disabled = false; makePdf.textContent = "Make PDF again"; showPdfButtons(); }
     });
-    const create = el("button", { type: "button", className: "primary", textContent: "Create package" });
+    viewPdf.addEventListener("click", () => send({ type: "BRIDGE_VIEW_PATH", path: state.pdf }));
+    const create = el("button", { type: "button", className: "primary", textContent: "Upload & create package" });
     create.addEventListener("click", async () => {
       remember();
       const choice = { cv: cv.value, transcript: transcript.value, coverLetter: ["__upload", "__claude"].includes(letter.value) ? "" : letter.value };
       if (letter.value === "__claude") {
         if (!state.drafted || !sentence.value.trim()) { say("Press Write with Claude first.", true); return; }
-        choice.claude = { text: sentence.value.trim(), posting: state.drafted };
+        // Upload exactly the PDF the student looked at, if the text hasn't changed since.
+        choice.claude = { text: sentence.value.trim(), posting: state.drafted, pdf: state.pdf && state.pdfText === sentence.value ? state.pdf : "" };
       }
       if (letter.value === "__upload") {
         const picked = file.files[0];
@@ -256,7 +286,7 @@
       why,
       el("label", { textContent: "CV" }), cv,
       el("label", { textContent: "Transcript" }), transcript,
-      el("label", { textContent: "Cover letter" }), letter, file, filePreview, hint, write, sentence, previewBtn, previewBox,
+      el("label", { textContent: "Cover letter" }), letter, file, filePreview, hint, sentence, change, write, previewBtn, previewBox, makePdf, viewPdf,
       create);
   }
 

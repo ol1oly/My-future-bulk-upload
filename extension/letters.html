@@ -29,17 +29,21 @@
       .state { font-size: 12px; font-weight: 650; }
       .state.ok { color: #14632b; }
       .issues { color: #7a5600; font-size: 12px; margin-top: 4px; }
+      .tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+      .tools input { flex: 1; min-width: 220px; padding: 6px 8px; border: 1px solid #cdd1d6; border-radius: 6px; font: inherit; }
     </style>
   </head>
   <body>
     <main>
       <h1>Cover letters for all</h1>
       <p class="note">Your active postings that don't have a package yet. <b>Write letters</b> asks Claude for each one
-        (about 15 s each), following your <a href="#" id="settings">cover letter settings</a>. Read and edit them, then
-        <b>Build packages</b> makes each PDF, uploads it and creates the package (about a minute each). Nothing is submitted.</p>
+        (about 15 s each), following your <a href="#" id="settings">cover letter settings</a>. Edit or rewrite any of them,
+        then <b>Make PDFs</b> (Word opens once per group) and look at them. <b>Upload &amp; build packages</b> uploads exactly
+        those PDFs and creates the packages. Nothing is submitted.</p>
       <div class="bar">
-        <button id="write" type="button">Write letters</button>
-        <button id="build" type="button" class="secondary">Build packages</button>
+        <button id="write" type="button">1. Write letters</button>
+        <button id="make" type="button" class="secondary">2. Make PDFs</button>
+        <button id="build" type="button" class="secondary">3. Upload &amp; build packages</button>
         <span id="status" class="status"></span>
       </div>
       <div id="list"></div>
