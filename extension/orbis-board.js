@@ -141,9 +141,9 @@
     return { details: Object.fromEntries(ids.filter((id) => details.has(id)).map((id) => [id, details.get(id)])), errors };
   }
 
-  function submitForm(formParams) {
+  function submitForm(formParams, target = "_BLANK") {
     if (!formParams || !globalThis.orbisAppSr?.buildForm) throw new Error("This posting has no such action.");
-    globalThis.orbisAppSr.buildForm(formParams, "", "_BLANK").submit();
+    globalThis.orbisAppSr.buildForm(formParams, "", target).submit();
   }
 
   async function toggle(fnName, id) {
@@ -167,6 +167,8 @@
     open: (id) => submitForm(params.get(String(id))?.view),
     // Opens myFuture's own application wizard in a new tab; the student chooses documents and submits there.
     apply: (id) => submitForm(params.get(String(id))?.apply),
+    // Same form in THIS tab (used by the bridge in a tab it opened, so no pop-up permission is needed).
+    applyHere: (id) => submitForm(params.get(String(id))?.apply, "_self"),
     toggleShortlist: (id) => toggle("saveFavoritePosting", id),
     notInterested: (id) => toggle("toggleBlacklistPosting", id)
   };

@@ -213,3 +213,32 @@ button.link:hover { background: none; color: var(--red-dark); }
 .bridge-panel { margin-top: 14px; padding: 12px; border: 1px dashed #cdd1d6; border-radius: 10px; }
 .bridge-panel strong { font-size: 13px; }
 .bridge-panel p { margin-top: 4px; }
+
+.apps-panel { margin-top: 14px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; }
+.apps-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.apps-head strong { font-size: 14px; }
+.apps-head span { color: var(--muted); font-size: 11px; }
+.apps-intro { margin-top: 4px; }
+.apps-steps { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 8px; }
+.apps-steps li { display: grid; grid-template-columns: 128px 1fr; gap: 8px; align-items: start; }
+.apps-steps li button { width: 100%; margin: 0; padding: 7px 8px; font-size: 12px; }
+.apps-steps li span { color: var(--muted); font-size: 11px; line-height: 1.35; }
+.apps-progress { margin-top: 10px; color: var(--ink); font-size: 12px; font-weight: 600; }
+.apps-progress:empty { display: none; }
+.apps-progress.bad { color: var(--red-dark); }
+.apps-list { margin-top: 10px; max-height: 260px; overflow-y: auto; border-top: 1px solid var(--line); }
+.app-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: start; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.app-row.applied { opacity: .6; }
+.app-main strong { display: block; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-meta { display: block; color: var(--muted); font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-error { display: block; color: var(--red-dark); font-size: 11px; margin-top: 2px; }
+.steps { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.step { font-size: 10.5px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--line); background: #fff; }
+.step.ok { border-color: #9fd3ad; background: #e8f6ec; color: #14632b; }
+.step.bad { border-color: #f1a7af; background: #fdecee; color: var(--red-dark); }
+.step.muted { color: var(--muted); }
+.apps-find { margin-top: 10px; font-size: 12px; }
+.apps-find summary { cursor: pointer; font-weight: 650; }
+.apps-find p, .apps-scan p { margin: 6px 0; font-size: 11px; }
+.apps-scan ol { margin: 0; padding-left: 18px; font-size: 11px; color: var(--ink); }
+.apps-find .secondary { margin-top: 0; }

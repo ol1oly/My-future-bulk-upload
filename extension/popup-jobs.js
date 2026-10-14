@@ -26,7 +26,7 @@
 
   async function saveTracker(tracker) {
     await chrome.storage.local.set({ [TRACKER_KEY]: tracker });
-    trackerButton.textContent = `Job tracker (${Object.keys(tracker).length})`;
+    trackerButton.textContent = `Saved postings (${Object.keys(tracker).length})`;
   }
 
   async function downloadText(content, filename, mime) {
@@ -174,7 +174,7 @@
     trackerPanel.hidden = !trackerPanel.hidden;
     if (!trackerPanel.hidden) await renderTracker();
   });
-  loadTracker().then((tracker) => { trackerButton.textContent = `Job tracker (${Object.keys(tracker).length})`; });
+  loadTracker().then((tracker) => { trackerButton.textContent = `Saved postings (${Object.keys(tracker).length})`; });
 
   globalThis.JobPanel = { scan, get current() { return current; } };
 })();

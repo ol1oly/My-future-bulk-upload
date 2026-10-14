@@ -13,6 +13,27 @@
   const BOARDS = { internshipscoop: "/myAccount/opportunities/internshipscoop/postings.htm", career: "/myAccount/opportunities/career/postings.htm" };
   const DATED = /_\d{4}-\d{2}-\d{2}$/;
   const progress = new Map(); // tabId -> latest progress line
+  const APPS_KEY = "mstApps"; // postingId -> { title, organization, board, package, letterName, letter, package_, applied, error, ... }
+
+  async function loadApps() { return (await chrome.storage.local.get({ [APPS_KEY]: {} }))[APPS_KEY]; }
+  async function updateApps(mutate) {
+    const apps = await loadApps();
+    mutate(apps);
+    await chrome.storage.local.set({ [APPS_KEY]: apps });
+    chrome.runtime.sendMessage({ type: "BRIDGE_APPS" }).catch(() => {});
+    return apps;
+  }
+  // Keep the store in step with plan.json: add new applications, keep progress of known ones.
+  async function seedApps(plan) {
+    return updateApps((apps) => {
+      for (const app of plan?.applications || []) {
+        const id = String(app.postingId);
+        apps[id] = { letter: app.letterPdf ? "todo" : "none", packageStatus: "todo", applied: false, ...(apps[id] || {}),
+          postingId: id, title: app.title || "", organization: app.organization || "", board: app.board || "internshipscoop",
+          package: app.package, letterName: app.letterName || "", inPlan: true };
+      }
+    });
+  }
 
   async function host(message) {
     const reply = await chrome.runtime.sendNativeMessage(HOST, message);
@@ -68,8 +89,12 @@
     result.board = board;
     result.scannedAt = new Date().toISOString();
     const saved = await host({ cmd: "writeResult", name: `scan-${board}`, data: result });
-    note(tabId, `Saved ${result.postings.length} postings to ${saved.path}`);
-    return { count: result.postings.length, path: saved.path };
+    const matching = result.postings.filter((p) => !p.why).sort((a, b) => b.fit.score - a.fit.score);
+    note(tabId, `Read ${result.postings.length} postings.`);
+    return {
+      count: result.postings.length, matching: matching.length, path: saved.path,
+      top: matching.slice(0, 8).map((p) => ({ id: p.postingId, score: p.fit.score, title: p.fields.title, organization: p.fields.organization || "", mcgill: p.apply.method === "myfuture" }))
+    };
   }
 
   // ---------- plan ----------
@@ -84,6 +109,7 @@
     const { plan } = await host({ cmd: "getPlan" });
     if (!plan?.applications?.length) throw new Error("plan.json has no applications");
     const apps = plan.applications.map((app) => ({ ...app }));
+    await seedApps(plan);
     const log = { startedAt: new Date().toISOString(), dryRun, steps: [] };
     await ensureFrameOps(tabId);
 
@@ -113,6 +139,15 @@
         return window.__mfFrame.upload(src, docs, files, dry);
       }, [await script("upload.js"), letters.map((app, i) => ({ file: files[i].name, name: app.letterName, type: "13" })), files.map((f) => ({ name: f.name, base64: f.base64 })), dryRun]);
       log.steps.push({ step: "upload", result: upload });
+      await updateApps((store) => {
+        for (const app of letters) {
+          const r = (upload?.results || []).find((x) => x.name === app.letterName);
+          const entry = store[String(app.postingId)];
+          if (!entry) continue;
+          if (dryRun) entry.checked = upload?.dryRun ? "ok" : "letter problem";
+          else entry.letter = r?.status === "saved" ? "done" : "failed";
+        }
+      });
       if (!dryRun && !upload?.ok) return finish(tabId, log, "Cover letter upload failed — no packages were created.");
     }
 
@@ -126,6 +161,16 @@
       if (clash.length && !dryRun) return finish(tabId, { ...log, steps: [...log.steps, { step: "packages", result: { ok: false, alreadyExist: clash } }] }, `Packages already exist: ${clash.join(", ")}`);
       const created = await inPage(tabId, (src, list, dry) => window.__mfFrame.packages(src, list, dry), [await script("packages.js"), packages, dryRun]);
       log.steps.push({ step: "packages", result: { ...created, alreadyExist: clash } });
+      await updateApps((store) => {
+        for (const app of apps) {
+          const entry = store[String(app.postingId)];
+          if (!entry || !app.package) continue;
+          entry.cvUsed = app.cv; entry.transcriptUsed = app.transcript || "";
+          if (dryRun) { entry.checked = created?.dryRun ? (entry.checked && entry.checked !== "ok" ? entry.checked : "ok") : "package problem"; continue; }
+          const r = (created?.results || []).find((x) => x.name === app.package);
+          entry.packageStatus = clash.includes(app.package) || r?.status === "created" ? "done" : r ? "failed" : entry.packageStatus;
+        }
+      });
     }
 
     if (!dryRun && plan.probeApply) {
@@ -160,41 +205,121 @@
       buttons: [...new Set(buttons)], forms, text: t(document.querySelector("#mainContentDiv, main") || document.body).slice(0, 5000) };
   };
 
+  function waitTab(tabId, timeoutMs = 45000) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { chrome.tabs.onUpdated.removeListener(listener); reject(new Error("page load timed out")); }, timeoutMs);
+      function listener(id, info) {
+        if (id === tabId && info.status === "complete") { clearTimeout(timer); chrome.tabs.onUpdated.removeListener(listener); resolve(); }
+      }
+      chrome.tabs.onUpdated.addListener(listener);
+    });
+  }
+
+  // Opens a NEW background tab on the posting's board and turns it into myFuture's own application form for that
+  // posting (same request as the Apply button). Shows a banner naming the package to choose. Never submits.
+  async function openFormTab(app, { active = false } = {}) {
+    const tab = await chrome.tabs.create({ url: `https://myfuture.mcgill.ca${BOARDS[app.board || "internshipscoop"]}`, active });
+    await waitTab(tab.id);
+    const listLoaded = waitTab(tab.id);
+    const clicked = await inPage(tab.id, () => {
+      const button = [...document.querySelectorAll("a,button")].find((node) => node.innerText.trim() === "View all available postings");
+      if (button) button.click();
+      return Boolean(button);
+    });
+    if (!clicked) throw new Error("Not signed in to myFuture (postings page not found)");
+    await listLoaded;
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: "MAIN", files: ["lib/jobs.js", "orbis-board.js"] });
+    const formLoaded = waitTab(tab.id);
+    const found = await inPage(tab.id, async (id) => {
+      const rows = await __orbisBoard.listAll();
+      if (!rows.some((row) => row.id === String(id))) return false;
+      __orbisBoard.applyHere(String(id));
+      return true;
+    }, [app.postingId]);
+    if (!found) { await chrome.tabs.remove(tab.id); throw new Error(`posting ${app.postingId} is no longer listed`); }
+    await formLoaded;
+    await inPage(tab.id, (packageName, title) => {
+      const bar = document.createElement("div");
+      bar.style.cssText = "position:sticky;top:0;z-index:2147483000;background:#ed1b2f;color:#fff;font:600 15px system-ui,sans-serif;padding:10px 16px";
+      bar.textContent = packageName ? `myFuture Toolkit: choose the package "${packageName}" for ${title}, review, then submit.` : `myFuture Toolkit: ${title} — choose your documents, review, then submit.`;
+      document.body.prepend(bar);
+    }, [app.package || "", app.title || app.postingId]);
+    return tab;
+  }
+
   async function probeApply(tabId, board, postingId) {
     note(tabId, `Opening the application form for ${postingId} (inspect only)…`);
-    await ensureFrameOps(tabId);
-    const engine = [await ownFile("lib/jobs.js"), await ownFile("orbis-board.js")];
-    const created = new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { chrome.tabs.onCreated.removeListener(listener); reject(new Error("application form did not open")); }, 30000);
-      function listener(tab) { if (tab.openerTabId === tabId) { clearTimeout(timer); chrome.tabs.onCreated.removeListener(listener); resolve(tab); } }
-      chrome.tabs.onCreated.addListener(listener);
-    });
-    await inPage(tabId, async (path, sources, id) => {
-      await window.__mfFrame.openBoard(path);
-      const w = window.__mfFrame.frameWindow();
-      for (const src of sources) w.eval(src);
-      await w.__orbisBoard.listAll();
-      w.__orbisBoard.apply(String(id));
-    }, [BOARDS[board], engine, postingId]);
-    const formTab = await created;
-    await new Promise((resolve) => {
-      const done = (id, info) => { if (id === formTab.id && info.status === "complete") { chrome.tabs.onUpdated.removeListener(done); resolve(); } };
-      chrome.tabs.onUpdated.addListener(done);
-      setTimeout(resolve, 20000);
-    });
+    const formTab = await openFormTab({ postingId, board });
     const snapshot = await inPage(formTab.id, PROBE);
     const saved = await host({ cmd: "writeResult", name: `probe-${postingId}`, data: { postingId, snapshot } });
     note(tabId, `Application form saved to ${saved.path} (nothing submitted)`);
     return { path: saved.path, formTabId: formTab.id };
   }
 
+  // Batch: one application form per ready posting, each in its own tab, one after another.
+  async function openForms(tabId, postingIds) {
+    const store = await loadApps();
+    const targets = (postingIds?.length ? postingIds : Object.keys(store)).map(String)
+      .map((id) => store[id]).filter((app) => app && !app.applied && app.packageStatus === "done");
+    if (!targets.length) throw new Error("No prepared application is waiting (run Prepare first).");
+    const opened = [], failed = [];
+    for (const [index, app] of targets.entries()) {
+      note(tabId, `Opening application form ${index + 1}/${targets.length}: ${app.organization} — ${app.title}`);
+      try {
+        const tab = await openFormTab(app, { active: index === 0 });
+        opened.push(app.postingId);
+        await updateApps((s) => { s[app.postingId].formOpenedAt = new Date().toISOString(); s[app.postingId].formTabId = tab.id; });
+      } catch (error) {
+        failed.push({ postingId: app.postingId, error: error.message || String(error) });
+        await updateApps((s) => { s[app.postingId].error = error.message || String(error); });
+      }
+    }
+    const message = `Opened ${opened.length} application form(s)${failed.length ? `, ${failed.length} failed` : ""}. In each tab, pick the named package and submit; then press Refresh status.`;
+    note(tabId, message);
+    return { message, opened, failed };
+  }
+
+  // Reads "Application Submitted" from each board's list and marks those applications as applied.
+  async function refreshStatus(tabId) {
+    const store = await loadApps();
+    const boards = [...new Set(Object.values(store).map((app) => app.board || "internshipscoop"))];
+    if (!boards.length) return { message: "No applications tracked yet." };
+    await ensureFrameOps(tabId);
+    const engine = [await ownFile("lib/jobs.js"), await ownFile("orbis-board.js")];
+    let applied = 0;
+    for (const board of boards) {
+      note(tabId, `Checking ${board} for submitted applications…`);
+      const rows = await inPage(tabId, async (path, sources) => {
+        await window.__mfFrame.openBoard(path);
+        const w = window.__mfFrame.frameWindow();
+        for (const src of sources) w.eval(src);
+        return (await w.__orbisBoard.listAll()).map((row) => ({ id: row.id, appStatus: row.appStatus, shortlisted: row.shortlisted }));
+      }, [BOARDS[board], engine]);
+      await updateApps((s) => {
+        for (const app of Object.values(s)) {
+          if ((app.board || "internshipscoop") !== board) continue;
+          const row = rows.find((r) => r.id === app.postingId);
+          if (!row) { app.listed = false; continue; }
+          app.listed = true;
+          app.appStatus = row.appStatus || "";
+          app.applied = /submitted|soumise/i.test(row.appStatus || "");
+          if (app.applied) applied += 1;
+        }
+      });
+    }
+    const message = `${applied} application(s) show as submitted on myFuture.`;
+    note(tabId, message);
+    return { message };
+  }
+
   async function status() {
     try {
       const ping = await host({ cmd: "ping" });
       const { plan } = await host({ cmd: "getPlan" });
-      return { ok: true, home: ping.home, plan };
+      await seedApps(plan);
+      return { ok: true, home: ping.home, plan, apps: await loadApps() };
     } catch (error) {
-      return { ok: false, error: error.message || String(error) };
+      return { ok: false, error: error.message || String(error), apps: await loadApps() };
     }
   }
 
@@ -204,7 +329,10 @@
       BRIDGE_SCAN: () => scanBoard(message.tabId, message.board, message.prefs),
       BRIDGE_CHECK_PLAN: () => runPlan(message.tabId, { dryRun: true }),
       BRIDGE_RUN_PLAN: () => runPlan(message.tabId),
-      BRIDGE_PROBE: () => probeApply(message.tabId, message.board, message.postingId)
+      BRIDGE_PROBE: () => probeApply(message.tabId, message.board, message.postingId),
+      BRIDGE_OPEN_FORMS: () => openForms(message.tabId, message.postingIds),
+      BRIDGE_REFRESH: () => refreshStatus(message.tabId),
+      BRIDGE_FORGET: () => updateApps((s) => { delete s[String(message.postingId)]; }).then(() => ({}))
     };
     const job = jobs[message?.type];
     if (!job) return undefined;
