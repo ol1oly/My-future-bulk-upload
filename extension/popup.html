@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>myFuture Toolkit</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <div class="mark" aria-hidden="true"><img src="assets/martlet-128.png" alt="" /></div>
+        <div>
+          <h1>myFuture Toolkit</h1>
+          <p id="status" role="status">Reading this page…</p>
+        </div>
+      </header>
+
+      <button id="smartSearch" type="button" class="smart-search" hidden>Smart search all postings</button>
+      <section id="bridgePanel" class="bridge-panel" hidden>
+        <strong>Local scripts</strong>
+        <p id="bridgeStatus">Checking local bridge…</p>
+        <div class="job-actions">
+          <button id="bridgeScanCoop" type="button" class="secondary">Scan Internship/Co-op</button>
+          <button id="bridgeScanCareer" type="button" class="secondary">Scan General Jobs</button>
+          <button id="bridgeCheck" type="button" class="secondary" hidden>Check plan</button>
+          <button id="bridgeRun" type="button" hidden>Run plan</button>
+        </div>
+        <p id="bridgeProgress" class="job-note"></p>
+      </section>
+      <section id="jobPanel" class="job-panel" hidden aria-live="polite"></section>
+      <section id="empty" class="empty" hidden></section>
+
+      <button id="trackerToggle" class="secondary tracker-toggle" type="button">Job tracker</button>
+      <section id="trackerPanel" class="tracker-panel" hidden aria-live="polite"></section>
+    </main>
+    <script src="lib/jobs.js"></script>
+    <script src="popup-jobs.js"></script>
+    <script src="popup-bridge.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>

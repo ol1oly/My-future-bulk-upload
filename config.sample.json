@@ -2,12 +2,30 @@
   "site": "https://myfuture.mcgill.ca",
   "root": "C:\\Users\\you\\Documents\\Jobs",
   "documents": [
-    { "file": "cv\\my_cv.pdf", "base": "my_cv", "type": "14" },
-    { "newestIn": "transcripts", "ext": ".pdf", "base": "Transcript", "type": "15" }
+    {
+      "file": "cv\\my_cv.pdf",
+      "base": "my_cv",
+      "type": "14"
+    },
+    {
+      "newestIn": "transcripts",
+      "ext": ".pdf",
+      "base": "Transcript",
+      "type": "15"
+    }
   ],
   "dateSuffix": true,
   "deleteOld": "same-base-dated",
   "packages": "one-per-cv",
   "deleteOldPackages": "same-base-dated",
-  "coverLetters": { "folder": "coverLetters", "mode": "on-request", "carryOver": "ask" }
+  "coverLetters": {
+    "folder": "coverLetters",
+    "mode": "on-request",
+    "carryOver": "ask"
+  },
+  "jobs": {
+    "applicationsFolder": "applications",
+    "letterTemplates": "coverLetters/templates",
+    "profile": "~/.claude/myfuture/profile.md"
+  }
 }

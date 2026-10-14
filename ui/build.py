@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Assemble the bookmarklet from the shared scripts + panel source.
+"""Assemble the bookmarklets: the documents panel (shared scripts + panel source) and Smart search (the extension's
+job search files).
 
 Strips comments (the bookmarklet is meant to be pasted, so it stays comment-free), injects the three
 operation scripts into the panel as JSON string literals and the version from ../VERSION, escapes every
@@ -16,6 +17,9 @@ from pathlib import Path
 
 UI = Path(__file__).resolve().parent
 SCRIPTS = UI.parent / "scripts"
+EXTENSION = UI.parent / "extension"
+# Smart search bookmarklet = the extension's files, in load order.
+SMART_SEARCH = ["lib/jobs.js", "orbis-board.js", "smart-search.js"]
 VERSION = (UI.parent / "VERSION").read_text(encoding="utf-8").strip()
 
 
@@ -107,13 +111,28 @@ def build_bundle():
     return panel
 
 
+def build_smart_search():
+    parts = []
+    for name in SMART_SEARCH:
+        src = strip_comments((EXTENSION / name).read_text(encoding="utf-8"))
+        check(src, name)
+        parts.append(src)
+    bundle = ascii_only(";\n".join(parts))
+    check(bundle, "smart search bundle")
+    return bundle
+
+
 def main():
     bundle = build_bundle()
     (UI / "panel.bundle.js").write_text(bundle, encoding="utf-8")
     b64 = base64.b64encode(bundle.encode("utf-8")).decode("ascii")
-    html = (UI / "install.template.html").read_text(encoding="utf-8").replace("__BUNDLE_B64__", b64).replace("__VERSION__", VERSION)
+    smart = build_smart_search()
+    (UI / "smart-search.bundle.js").write_text(smart, encoding="utf-8")
+    smart_b64 = base64.b64encode(smart.encode("utf-8")).decode("ascii")
+    html = ((UI / "install.template.html").read_text(encoding="utf-8").replace("__BUNDLE_B64__", b64)
+            .replace("__SMART_B64__", smart_b64).replace("__VERSION__", VERSION))
     (UI / "install.html").write_text(html, encoding="utf-8")
-    print(f"v{VERSION} panel.bundle.js: {len(bundle)} chars (comment-free); install.html: {len(html)} chars")
+    print(f"v{VERSION} panel.bundle.js: {len(bundle)} chars; smart-search.bundle.js: {len(smart)} chars; install.html: {len(html)} chars")
 
 
 if __name__ == "__main__":
