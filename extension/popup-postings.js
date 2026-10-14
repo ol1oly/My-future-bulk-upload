@@ -205,6 +205,8 @@
     const applyRecommendation = (rec) => {
       const pick = pickCv(newest(docs.cvs), rec.cv);
       for (const option of cv.options) option.textContent = option.value + (option.value === pick.name ? " (recommended)" : "");
+      const recommended = [...cv.options].find((o) => o.value === pick.name);
+      if (recommended) cv.prepend(recommended); // recommended CV first in the list
       if (!state.cv) cv.value = pick.name;
       if (!state.transcript) transcript.value = rec.documents?.transcript && docs.transcripts.length ? newest(docs.transcripts)[0] : "";
       if (!state.letter) letter.value = rec.documents?.coverLetter ? (lettersReady() ? "__claude" : "") : "";

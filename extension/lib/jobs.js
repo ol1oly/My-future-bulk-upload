@@ -13,7 +13,8 @@
     division: ["division", "department", "département", "service"],
     positionType: ["position type", "job type", "type de poste", "level", "type of position", "type de poste", "type d'emploi"],
     location: ["job city", "ville de l'emploi", "job location", "location", "work location", "job - city", "city", "lieu de travail", "lieu", "emplacement", "ville"],
-    region: ["job province/state", "province/état de l'emploi", "job - province / state", "job - country", "province / state", "province/state", "province", "region", "country", "pays"],
+    region: ["job province/state", "province/état de l'emploi", "job - province / state", "province / state", "province/state", "province", "region"],
+    country: ["job country", "pays de l'emploi", "job - country", "country", "pays"],
     workArrangement: ["job format", "format du travail", "employment location arrangement", "work arrangement", "work mode", "employment mode", "remote work", "mode de travail", "télétravail", "modalité de travail"],
     openings: ["number of job openings", "job openings", "number of positions", "number of openings", "nombre de postes"],
     salary: ["starting salary or salary range", "salaire de départ ou échelle salariale", "compensation and benefits information", "compensation and benefits", "salary", "compensation", "salary range", "wage", "pay", "rémunération", "salaire"],
@@ -286,9 +287,49 @@
     onlyShortlisted: false,
     hideShortlisted: false,
     year: "",                 // e.g. "Third Year" — posting must target it (postings without the field pass)
+    provinces: [],            // canonical province/state names; empty = anywhere
+    city: "",                 // part of the city name
+    format: "any",            // any | inperson | hybrid | remote
     minScore: 0,
     sort: "score"             // score | deadline | newest
   };
+
+  // Province / state names as myFuture writes them in either language, or as abbreviations, mapped to one name.
+  const PROVINCES = {
+    "Quebec": ["qc", "que", "quebec", "province of quebec"], "Ontario": ["on", "ont", "ontario"], "British Columbia": ["bc", "british columbia", "colombie-britannique"],
+    "Alberta": ["ab", "alta", "alberta"], "Manitoba": ["mb", "manitoba"], "Saskatchewan": ["sk", "sask", "saskatchewan"],
+    "Nova Scotia": ["ns", "nova scotia", "nouvelle-ecosse"], "New Brunswick": ["nb", "new brunswick", "nouveau-brunswick"],
+    "Newfoundland and Labrador": ["nl", "nfld", "newfoundland and labrador", "terre-neuve-et-labrador"], "Prince Edward Island": ["pe", "pei", "prince edward island", "ile-du-prince-edouard"],
+    "Yukon": ["yt", "yukon"], "Northwest Territories": ["nt", "northwest territories", "territoires du nord-ouest"], "Nunavut": ["nu", "nunavut"]
+  };
+  const PROVINCE_INDEX = new Map();
+  for (const [name, aliases] of Object.entries(PROVINCES)) for (const alias of aliases) PROVINCE_INDEX.set(alias, name);
+
+  function provinceName(value) {
+    const key = fold(clean(value).toLowerCase()).replace(/\s+/g, " ").replace(/\.$/, "");
+    if (!key) return "";
+    return PROVINCE_INDEX.get(key) || clean(value).replace(/\s+/g, " ");
+  }
+
+  // "Montreal, QC" / city field / list city → { city, province, provinces, country, areas } for filters and display.
+  // areas = the province(s) named (e.g. "Ontario or Quebec" → both), or the country when no province is given.
+  function locationOf(parsed, listCity = "") {
+    const f = parsed.fields || {};
+    const city = clean(listCity || f.location || "").split(/[,;\n]/)[0].trim();
+    let raw = clean(f.region);
+    if (!raw) raw = clean(f.location || "").split(",").slice(1).join(",").trim();
+    const provinces = [...new Set(raw.split(/\s+(?:or|and|ou|et)\s+|[,/&;]/i).map(provinceName).filter(Boolean))];
+    const country = clean(f.country);
+    return { city, province: provinces[0] || "", provinces, country, areas: provinces.length ? provinces : country ? [country] : [] };
+  }
+
+  function workFormat(parsed) {
+    const value = fold(clean(parsed.fields?.workArrangement).toLowerCase());
+    if (/hybrid|hybride/.test(value)) return "hybrid";
+    if (/remote|distance|teletravail|virtual|virtuel/.test(value)) return "remote";
+    if (/in person|on.?site|presentiel|sur place|en personne/.test(value)) return "inperson";
+    return "";
+  }
 
   function scorePosting(parsed, prefs = DEFAULT_PREFS) {
     const f = parsed.fields;
@@ -331,6 +372,12 @@
     if (prefs.language === "en-ok" && jobLang && !hasEn) return "language";
     if (prefs.language === "fr-ok" && jobLang && !hasFr) return "language";
     if (prefs.year && f.targetYear && !clean(f.targetYear).toLowerCase().includes(prefs.year.toLowerCase())) return "year";
+    if (prefs.provinces?.length || prefs.city) {
+      const where = locationOf(parsed, meta.city);
+      if (prefs.provinces?.length && !where.areas.some((area) => prefs.provinces.includes(area))) return "location";
+      if (prefs.city && !fold(where.city.toLowerCase()).includes(fold(prefs.city.toLowerCase().trim()))) return "location";
+    }
+    if (prefs.format && prefs.format !== "any" && workFormat(parsed) !== prefs.format) return "format";
     if (prefs.text) {
       const all = Object.values(f).join(" ").toLowerCase();
       const missing = prefs.text.toLowerCase().split(/\s+/).filter(Boolean).find((word) => word.startsWith("-") ? all.includes(word.slice(1)) : !all.includes(word));
@@ -364,6 +411,6 @@
 
   return {
     FIELD_ALIASES, fieldForLabel, normalizeLabel, detectLanguage, recommendTrack, parseDocuments, parseMethod, parseDate, daysUntil,
-    parsePosting, isLikelyPosting, jobFileStem, mailtoFor, DEFAULT_PREFS, scorePosting, filterPosting, isSubmitted, trackerRow, trackerCsv, TRACKER_COLUMNS, slug
+    parsePosting, isLikelyPosting, jobFileStem, mailtoFor, DEFAULT_PREFS, scorePosting, filterPosting, isSubmitted, provinceName, locationOf, workFormat, trackerRow, trackerCsv, TRACKER_COLUMNS, slug
   };
 });

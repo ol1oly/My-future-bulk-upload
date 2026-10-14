@@ -149,3 +149,28 @@ assert.equal(jobs.fieldForLabel("Methode pour postuler"), "applicationMethod");
 assert.equal(jobs.parseMethod({ applicationMethod: "Candidatures gérées par le McGill University" }).method, "myfuture");
 assert.equal(jobs.parseMethod({ applicationMethod: "Access through an external website https://x.example/apply-by-email" }).method, "website");
 console.log("Broken-label tests passed.");
+
+// Location and work format filters (myFuture-style province checkboxes + city).
+const montreal = jobs.parsePosting([
+  { label: "Job Title:", value: "Software Developer" }, { label: "Organization:", value: "Genetec" },
+  { label: "Job City:", value: "Montreal" }, { label: "Job Province/State:", value: "QC" }, { label: "Job Country:", value: "Canada" },
+  { label: "Job Format:", value: "Hybrid" }]);
+assert.deepEqual(jobs.locationOf(montreal), { city: "Montreal", province: "Quebec", provinces: ["Quebec"], country: "Canada", areas: ["Quebec"] });
+const either = jobs.parsePosting([{ label: "Job Title", value: "Dev" }, { label: "Job Province/State", value: "Ontario or Quebec" }]);
+assert.deepEqual(jobs.locationOf(either).areas, ["Ontario", "Quebec"]);
+assert.equal(jobs.filterPosting(either, {}, { ...jobs.DEFAULT_PREFS, hidePassed: false, provinces: ["Quebec"] }), "");
+const us = jobs.parsePosting([{ label: "Job Title", value: "Dev" }, { label: "Job Country", value: "United States of America" }]);
+assert.deepEqual(jobs.locationOf(us).areas, ["United States of America"]);
+assert.equal(jobs.provinceName("Québec"), "Quebec");
+assert.equal(jobs.provinceName("ON"), "Ontario");
+assert.equal(jobs.workFormat(montreal), "hybrid");
+const P2 = { ...jobs.DEFAULT_PREFS, hidePassed: false };
+assert.equal(jobs.filterPosting(montreal, {}, { ...P2, provinces: ["Quebec"] }), "");
+assert.equal(jobs.filterPosting(montreal, {}, { ...P2, provinces: ["Ontario"] }), "location");
+assert.equal(jobs.filterPosting(montreal, {}, { ...P2, city: "montréal" }), "");
+assert.equal(jobs.filterPosting(montreal, {}, { ...P2, city: "Toronto" }), "location");
+assert.equal(jobs.filterPosting(montreal, {}, { ...P2, format: "remote" }), "format");
+assert.equal(jobs.filterPosting(montreal, {}, { ...P2, format: "hybrid" }), "");
+const toronto = jobs.parsePosting([{ label: "Job Title", value: "Dev" }, { label: "Job Location", value: "Toronto, ON" }]);
+assert.equal(jobs.locationOf(toronto).province, "Ontario");
+console.log("Location filter tests passed.");

@@ -56,6 +56,10 @@
       "Reset filters": "Réinitialiser les filtres",
       "Reading postings…": "Lecture des offres…",
     "Not on a postings list": "Pas sur une liste d'offres",
+    "Province / State": "Province / État", "City contains": "Ville contient", "e.g. Montreal": "ex. Montréal",
+    "Appears once postings are read.": "S'affiche une fois les offres lues.", "None checked = anywhere.": "Aucune cochée = partout.",
+    "Work format": "Format de travail", "In person": "En personne", "Hybrid": "Hybride", "Remote": "À distance",
+    "location": "lieu", "format": "format",
     "Smart search reads the “View all available postings” list. Open one of these, click “View all available postings”, then open Smart search again:": "La recherche avancée lit la liste « View all available postings ». Ouvrez l'une de ces pages, cliquez sur « View all available postings », puis rouvrez la recherche avancée :",
     "Internship / Co-op postings": "Offres de stage / co-op", "General Jobs postings": "Offres d'emploi",
       "Open Internship / Co-op (or General Jobs) → Job Postings → “View all available postings”, then open Smart search again.": "Ouvrez Stage / Co-op (ou Emplois) → Offres → « View all available postings », puis rouvrez la recherche avancée.",
@@ -167,6 +171,8 @@
 #${ROOT_ID} button:disabled{opacity:.5;cursor:wait}
 #${ROOT_ID} .mst-progress{height:3px;background:#ed1b2f;width:0;transition:width .2s}
 #${ROOT_ID} .mst-empty{padding:40px;text-align:center;color:#68707d}
+#${ROOT_ID} .mst-areas{max-height:150px;overflow:auto;border:1px solid #d8dade;border-radius:6px;background:#fff;padding:4px 8px}
+#${ROOT_ID} .mst-areas .mst-check{margin:3px 0;font-size:12px}
 ` });
 
   const status = el("span", { class: "mst-status", textContent: t("Loading postings…") });
@@ -210,6 +216,37 @@
   function check(key, text) {
     return el("label", { class: "mst-check" }, bind(el("input", { type: "checkbox", checked: Boolean(prefs[key]) }), key), t(text));
   }
+  // Province / state checkboxes with counts (like myFuture's advanced search), and a city box with suggestions.
+  function locationFilters() {
+    const areaCounts = {}, cities = {};
+    for (const p of postings) {
+      const where = J.locationOf(p, p.row.city);
+      for (const area of where.areas) areaCounts[area] = (areaCounts[area] || 0) + 1;
+      if (where.city) cities[where.city] = (cities[where.city] || 0) + 1;
+    }
+    const chosen = new Set(prefs.provinces || []);
+    for (const area of chosen) areaCounts[area] = areaCounts[area] || 0;
+    const boxes = Object.entries(areaCounts).sort((a, b) => b[1] - a[1]).map(([area, n]) => {
+      const box = el("input", { type: "checkbox", checked: chosen.has(area) });
+      box.addEventListener("change", () => {
+        const set = new Set(prefs.provinces || []);
+        if (box.checked) set.add(area); else set.delete(area);
+        prefs.provinces = [...set]; savePrefs(); render();
+      });
+      return el("label", { class: "mst-check" }, box, `${area} (${n})`);
+    });
+    const listId = "mst-city-list";
+    const city = bind(el("input", { type: "text", value: prefs.city || "", placeholder: t("e.g. Montreal") }), "city");
+    city.setAttribute("list", listId);
+    const datalist = el("datalist", { id: listId }, ...Object.keys(cities).sort().map((c) => el("option", { value: c })));
+    return [
+      el("label", { textContent: t("Province / State") }),
+      postings.length ? el("div", { class: "mst-areas" }, ...boxes) : el("small", { textContent: t("Appears once postings are read.") }),
+      el("small", { textContent: t("None checked = anywhere.") }),
+      el("label", { textContent: t("City contains") }), city, datalist
+    ];
+  }
+
   function renderFilters() {
     const list = (key) => bind(el("textarea", { value: (prefs[key] || []).join(", ") }), key, (v) => v.split(/[,\n]/).map((s) => s.trim()).filter(Boolean));
     aside.replaceChildren(...[
@@ -218,6 +255,8 @@
       ...field("Apply through", select("method", [["any", "Any"], ["myfuture", "McGill (myFuture)"], ["external", "External site / email"]])),
       ...field("Work language", select("language", [["any", "Any"], ["en-ok", "English (incl. bilingual)"], ["en", "English only"], ["fr-ok", "French (incl. bilingual)"], ["fr", "French only"]])),
       ...field("Targets year", select("year", [["", "Any"], ["First Year", "First year"], ["Second Year", "Second year"], ["Third Year", "Third year"], ["Fourth Year", "Fourth year"]])),
+      ...locationFilters(),
+      ...field("Work format", select("format", [["any", "Any"], ["inperson", "In person"], ["hybrid", "Hybrid"], ["remote", "Remote"]])),
       ...field("Deadline within (days)", bind(el("input", { type: "number", min: 0, value: prefs.deadlineDays || "" }), "deadlineDays", (v) => Number(v) || 0), "Empty = any"),
       ...field("Minimum match score", bind(el("input", { type: "number", min: 0, max: 100, value: prefs.minScore || "" }), "minScore", (v) => Number(v) || 0)),
       check("hidePassed", "Hide passed deadlines"),
@@ -237,7 +276,7 @@
     for (const p of postings) p.fit = J.scorePosting(p, prefs);
   }
   function visible() {
-    const shown = postings.filter((p) => !(p.why = J.filterPosting(p, { appStatus: p.row.appStatus, shortlisted: p.row.shortlisted }, prefs)));
+    const shown = postings.filter((p) => !(p.why = J.filterPosting(p, { appStatus: p.row.appStatus, shortlisted: p.row.shortlisted, city: p.row.city }, prefs)));
     const byDeadline = (a, b) => (a.deadline || "9999").localeCompare(b.deadline || "9999");
     if (prefs.sort === "deadline") return shown.sort(byDeadline);
     if (prefs.sort === "newest") return shown.sort((a, b) => Number(b.row.id) - Number(a.row.id));
@@ -269,6 +308,7 @@
         return p;
       });
       rescore();
+      renderFilters();
       status.textContent = t("{n} postings read · {time}", { n: postings.length, time: new Date().toLocaleTimeString() });
       progress.style.width = "0";
       render();
@@ -350,7 +390,7 @@
       el("div", { class: `mst-score${score >= 60 ? " hi" : score >= 30 ? " mid" : ""}`, textContent: String(score), title: p.fit.hits.join(", ") || t("no keyword matched") }),
       el("div", {},
         el("a", { class: "mst-title", textContent: f.title || r.title, title: t("Open posting in a new tab"), onclick: () => board.open(r.id) }),
-        el("div", { class: "mst-meta", textContent: [r.organization, r.city, f.term, f.salary && f.salary.slice(0, 40), p.deadline ? `${t("deadline {date}", { date: p.deadline })}${days !== null && days >= 0 ? ` (${days}d)` : ""}` : r.deadlineText].filter(Boolean).join(" · ") }),
+        el("div", { class: "mst-meta", textContent: [r.organization, [r.city, J.locationOf(p, r.city).areas.join(" / ")].filter(Boolean).join(", "), f.term, f.salary && f.salary.slice(0, 40), p.deadline ? `${t("deadline {date}", { date: p.deadline })}${days !== null && days >= 0 ? ` (${days}d)` : ""}` : r.deadlineText].filter(Boolean).join(" · ") }),
         el("div", { class: "mst-chips" }, ...chips)),
       el("div", { class: "mst-actions" }, ...actions));
   }
