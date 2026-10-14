@@ -23,7 +23,7 @@ remaining judgment is about two sentences per posting.
 - **No AI** (this extension): field parsing by label text, language detection, CV-track keyword scoring, document
   checklist, deadline, salutation, tracker, job-card JSON. These are deterministic, testable (`tests/jobs.test.js`),
   private (no network), and need no API keys in the extension.
-- **AI** (optional, outside the extension, e.g. a Claude Code skill): reads a job card, writes the 2–3 slot
+- **AI** (optional, outside the extension, e.g. a Claude Code skill): reads a posting (from a scan or the shortlist), writes the 2–3 slot
   sentences from a fixed list of the student's true facts, fills the Word template, exports a 1-page PDF, and
   prepares the package or an email draft. Guard rails in the fill script: no leftover `[SLOT]`, no previous
   company names, 1 page max.

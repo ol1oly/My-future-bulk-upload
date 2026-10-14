@@ -20,7 +20,6 @@
       "Select all": "Tout sélectionner",
       "Clear": "Effacer",
       "Shortlist selected": "Présélectionner la sélection",
-      "Save selected as job cards": "Enregistrer la sélection (fiches)",
       "Export CSV": "Exporter en CSV",
       "Search all text": "Rechercher dans tout le texte",
       "Every word must appear anywhere in the posting; -word excludes.": "Chaque mot doit apparaître dans l'offre; -mot exclut.",
@@ -82,7 +81,6 @@
       "Apply": "Postuler", "Continue": "Continuer", "Submitted": "Soumise", "Started": "Commencée",
       "Opens myFuture's application form in a new tab": "Ouvre le formulaire de candidature de myFuture dans un nouvel onglet",
       "Employer site ↗": "Site de l'employeur ↗",
-      "Save card": "Enregistrer la fiche",
       "Not interested": "Pas intéressé",
       "Hide from myFuture lists (myFuture's own Not Interested list)": "Masquer dans myFuture (liste « Not Interested » de myFuture)",
       "no keyword matched": "aucun mot-clé trouvé",
@@ -189,7 +187,6 @@
           L(el("button", { type: "button", onclick: () => { visible().forEach((p) => selected.add(p.row.id)); render(); } }), "textContent", "Select all"),
           L(el("button", { type: "button", onclick: () => { selected.clear(); render(); } }), "textContent", "Clear"),
           L(el("button", { type: "button", onclick: (event) => bulkShortlist(event.currentTarget) }), "textContent", "Shortlist selected"),
-          L(el("button", { type: "button", onclick: () => saveCards(postings.filter((p) => selected.has(p.row.id))) }), "textContent", "Save selected as job cards"),
           L(el("button", { type: "button", onclick: exportCsv }), "textContent", "Export CSV")),
         list)));
   document.head.append(style);
@@ -308,16 +305,6 @@
     document.body.append(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 30000);
   }
-  function cardFor(p) {
-    const { row, why, ...parsed } = p;
-    return { schema: 1, savedAt: new Date().toISOString(), source: "myfuture", postingId: row.id, shortlisted: row.shortlisted, ...parsed };
-  }
-  function saveCards(items) {
-    if (!items.length) return;
-    const day = new Date().toISOString().slice(0, 10);
-    if (items.length === 1) download(`${JSON.stringify(cardFor(items[0]), null, 2)}\n`, `${J.jobFileStem(items[0])}.json`, "application/json");
-    else download(`${JSON.stringify(items.map(cardFor), null, 2)}\n`, `job-cards-${day}.json`, "application/json");
-  }
   function exportCsv() {
     const rows = visible().map((p) => ({ ...J.trackerRow(p, p.row.appStatus ? "applied" : p.row.shortlisted ? "shortlisted" : "found"), notes: `score ${p.fit.score}` }));
     download(J.trackerCsv(rows), `myfuture-postings-${new Date().toISOString().slice(0, 10)}.csv`, "text/csv");
@@ -356,7 +343,6 @@
       el("button", { type: "button", class: r.shortlisted ? "on" : "", textContent: t(r.shortlisted ? "★ Shortlisted" : "☆ Shortlist"), onclick: (event) => toggleShortlist(p, event.currentTarget) }),
       mcgill && r.canApply && !J.isSubmitted(r.appStatus) ? el("button", { type: "button", class: "primary", textContent: t(r.appStatus ? "Continue" : "Apply"), title: t("Opens myFuture's application form in a new tab"), onclick: () => board.apply(r.id) }) : null,
       !mcgill && p.apply.urls[0] ? el("a", { class: "mst-link", href: p.apply.urls[0], target: "_blank", rel: "noopener", textContent: t("Employer site ↗") }) : null,
-      el("button", { type: "button", textContent: t("Save card"), onclick: () => saveCards([p]) }),
       el("button", { type: "button", textContent: t("Not interested"), title: t("Hide from myFuture lists (myFuture's own Not Interested list)"), onclick: () => notInterested(p) })
     ];
     return el("div", { class: "mst-row" },
