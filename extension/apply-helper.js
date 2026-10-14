@@ -50,8 +50,8 @@
     let picked = "";
     const render = () => {
       if (!picked) picked = preselect(context.package); // select once; never override the student's own choice later
-      const what = context.title ? `Applying to ${context.title}${context.organization ? ` — ${context.organization}` : ""}. ` : "";
-      text.textContent = context.done ? `${what}Submitted ✓ — press Sync in the extension to update My postings.` : context.package
+      const what = context.title ? `Applying to ${context.title}${context.organization ? ` at ${context.organization}` : ""}. ` : "";
+      text.textContent = context.done ? `${what}Submitted ✓. Press Sync in the extension to update My postings.` : context.package
         ? picked
           ? `${what}Package “${context.package}” is selected for you. Review, then submit.`
           : `${what}Choose the package “${context.package}” when myFuture asks for documents, then submit.`

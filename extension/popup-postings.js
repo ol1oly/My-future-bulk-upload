@@ -7,7 +7,7 @@
   const $ = (sel) => document.querySelector(sel);
   const panel = $("#postingsPanel"), listEl = $("#postingsList"), countEl = $("#postingsCount"), syncedEl = $("#postingsSynced");
   const progressEl = $("#postingsProgress"), filtersEl = $("#postingsFilters"), noteEl = $("#postingsNote");
-  const applyAllBtn = $("#applyAll"), syncBtn = $("#syncButton"), findBtn = $("#findMatches");
+  const applyAllBtn = $("#applyAll"), syncBtn = $("#syncButton"), findBtn = $("#findMatches"), writeAllBtn = $("#writeAll");
   const claudePanel = $("#claudePanel"), claudeStatus = $("#claudeStatus"), claudeRun = $("#claudeRun");
   const FILTERS = [["active", "Active"], ["suggested", "Suggested"], ["prepare", "No package yet"], ["ready", "Package ready"], ["submitted", "Submitted"], ["shortlist", "★ Shortlist"]];
   const STAGE_LABEL = { submitted: "Submitted", started: "Started", ready: "Package ready", prepare: "No package yet" };
@@ -89,6 +89,9 @@
       noteEl.append(unhide);
     }
     const ready = n.ready;
+    const needPackage = items.filter((i) => i.stage === "prepare").length;
+    writeAllBtn.hidden = !(lettersReady() && onMyFuture && needPackage);
+    writeAllBtn.textContent = `Write letters for all without a package (${needPackage})`;
     applyAllBtn.textContent = Date.now() < armedUntil ? `Click again to open ${ready} form(s)` : `Apply to all with a package (${ready})`;
     const shown = items.filter((i) => matches(i, filter));
     if (!shown.length) {
@@ -131,7 +134,7 @@
       item.fromClaude ? chip("From Claude") : null);
     return el("div", { className: `app-row${item.stage === "submitted" ? " applied" : ""}` },
       el("div", { className: "app-main" },
-        el("strong", { textContent: `${item.organization || "Posting"} — ${item.title || item.postingId}` }),
+        el("strong", { textContent: `${item.organization || "Posting"}: ${item.title || item.postingId}` }),
         el("span", { className: "app-meta", textContent: [item.deadlineText && `deadline ${item.deadlineText}`, item.package && `package ${item.package}`].filter(Boolean).join(" · ") }),
         chips,
         item.suggested && item.reason && item.stage !== "submitted" ? el("span", { className: "app-reason", textContent: item.reason }) : null,
@@ -142,18 +145,6 @@
 
   // Per-posting form state, so choices and Claude's sentence survive list refreshes.
   const forms = new Map();
-
-  // Best CV document for a suggestion like "en_fullstack": exact base first, then language + track words in the name.
-  function pickCv(names, suggestion) {
-    if (!suggestion) return { name: names[0], exact: false };
-    const exact = names.find((n) => n.startsWith(`${suggestion}_`) || n === suggestion);
-    if (exact) return { name: exact, exact: true };
-    const [lang, track] = suggestion.split("_");
-    const trackWords = { fullstack: /full.?stack|web|front|back/i, games: /game|jeu/i, normal: /normal|general|software|dev/i }[track] || /$^/;
-    const langWord = lang === "fr" ? /(^|[_\s-])fr([_\s-]|$)|fran/i : /(^|[_\s-])en([_\s-]|$)|engl/i;
-    const scored = names.map((n) => ({ n, score: (langWord.test(n) ? 4 : 0) + (trackWords.test(n) ? 3 : 0) })).sort((a, b) => b.score - a.score);
-    return { name: scored[0]?.score ? scored[0].n : names[0], exact: false };
-  }
 
   function packageForm(item, ref) {
     if (!docs?.cvs?.length) return el("p", { className: "app-error", textContent: "Press Sync first so the extension knows your CVs, transcripts and cover letters on myFuture." });
@@ -169,13 +160,13 @@
     const file = el("input", { type: "file", accept: "application/pdf,.pdf", hidden: true });
     const write = el("button", { type: "button", className: "secondary", textContent: state.drafted ? "Write again" : "Write with Claude", hidden: true });
     const sentence = el("textarea", { hidden: true, rows: 4, value: state.sentence || "", placeholder: "Claude's sentence about this posting appears here; edit it if you like." });
-    const hint = el("small", { hidden: true, textContent: "Claude writes the one sentence about this posting from your profile; the rest is your template. Takes ~10 s, then ~1 min to make the PDF." });
+    const hint = el("small", { hidden: true, textContent: "Claude writes from your facts and your cover letter settings. Takes ~10 s, then ~1 min to make the PDF." });
     const previewBtn = el("button", { type: "button", className: "link", textContent: "Preview the whole letter", hidden: true });
     const previewBox = el("pre", { className: "letter-preview", hidden: true });
     const filePreview = el("button", { type: "button", className: "link", textContent: "Preview this PDF", hidden: true });
     previewBtn.addEventListener("click", async () => {
       if (!previewBox.hidden) { previewBox.hidden = true; previewBtn.textContent = "Preview the whole letter"; return; }
-      const reply = await send({ type: "BRIDGE_PREVIEW_LETTER", posting: state.drafted, sentence: sentence.value });
+      const reply = await send({ type: "BRIDGE_PREVIEW_LETTER", posting: state.drafted, text: sentence.value });
       if (!reply?.ok) { say(`Couldn't preview: ${reply?.error || "no answer"}`, true); return; }
       previewBox.textContent = reply.text;
       previewBox.hidden = false;
@@ -203,7 +194,7 @@
 
     // Apply the recommendation (only for fields the student hasn't touched).
     const applyRecommendation = (rec) => {
-      const pick = pickCv(newest(docs.cvs), rec.cv);
+      const pick = JobTools.pickCv(newest(docs.cvs), rec.cv);
       for (const option of cv.options) option.textContent = option.value + (option.value === pick.name ? " (recommended)" : "");
       const recommended = [...cv.options].find((o) => o.value === pick.name);
       if (recommended) cv.prepend(recommended); // recommended CV first in the list
@@ -211,7 +202,7 @@
       if (!state.transcript) transcript.value = rec.documents?.transcript && docs.transcripts.length ? newest(docs.transcripts)[0] : "";
       if (!state.letter) letter.value = rec.documents?.coverLetter ? (lettersReady() ? "__claude" : "") : "";
       const needs = [rec.documents?.transcript && "a transcript", rec.documents?.coverLetter && "a cover letter"].filter(Boolean);
-      why.textContent = `Recommended CV: ${rec.cv}${rec.matched?.length ? ` (matches ${rec.matched.slice(0, 5).join(", ")})` : ""}${pick.exact ? "" : " — closest name in your CVs"}. `
+      why.textContent = `Recommended CV: ${rec.cv}${rec.matched?.length ? ` (matches ${rec.matched.slice(0, 5).join(", ")})` : ""}${pick.exact ? "" : " (closest name in your CVs)"}. `
         + (needs.length ? `This posting asks for ${needs.join(" and ")}.` : "This posting asks only for a CV.")
         + (rec.documents?.coverLetter && !lettersReady() ? " Pick one of your cover letters below, or upload a PDF." : "");
       sync();
@@ -237,8 +228,9 @@
         const reply = await send({ type: "BRIDGE_DRAFT_LETTER", item: ref });
         if (!reply?.ok) { say(`Claude couldn't write it: ${reply?.error || "no answer"}`, true); return; }
         state.drafted = reply.posting;
-        state.sentence = sentence.value = reply.sentence;
-        say("Read Claude's sentence below, edit if needed, then press Create package.");
+        state.sentence = sentence.value = reply.text;
+        sentence.rows = reply.style === "free" ? 12 : 4;
+        say(reply.issues?.length ? `Check before using: ${reply.issues.join("; ")}.` : "Read the letter text below, edit if needed, then press Create package.", Boolean(reply.issues?.length));
       } finally { write.disabled = false; write.textContent = "Write again"; sync(); }
     });
     const create = el("button", { type: "button", className: "primary", textContent: "Create package" });
@@ -247,7 +239,7 @@
       const choice = { cv: cv.value, transcript: transcript.value, coverLetter: ["__upload", "__claude"].includes(letter.value) ? "" : letter.value };
       if (letter.value === "__claude") {
         if (!state.drafted || !sentence.value.trim()) { say("Press Write with Claude first.", true); return; }
-        choice.claude = { sentence: sentence.value.trim(), posting: state.drafted };
+        choice.claude = { text: sentence.value.trim(), posting: state.drafted };
       }
       if (letter.value === "__upload") {
         const picked = file.files[0];
@@ -333,6 +325,8 @@
     panel.hidden = false;
     if (!onMyFuture) { syncBtn.disabled = true; syncBtn.title = "Open a myFuture page first"; }
     syncBtn.addEventListener("click", () => run(syncBtn, { type: "BRIDGE_SYNC" }, "Syncing…"));
+    writeAllBtn.addEventListener("click", () => chrome.tabs.create({ url: chrome.runtime.getURL("letters.html") }));
+    $("#letterSettings").addEventListener("click", (e) => { e.preventDefault(); chrome.runtime.openOptionsPage(); });
     if (!onMyFuture) { findBtn.disabled = true; findBtn.title = "Open a myFuture page first"; }
     findBtn.addEventListener("click", async () => {
       filter = "suggested";

@@ -286,7 +286,7 @@
     hideApplied: true,
     onlyShortlisted: false,
     hideShortlisted: false,
-    year: "",                 // e.g. "Third Year" — posting must target it (postings without the field pass)
+    year: "",                 // e.g. "Third Year": posting must target it (postings without the field pass)
     provinces: [],            // canonical province/state names; empty = anywhere
     city: "",                 // part of the city name
     format: "any",            // any | inperson | hybrid | remote
@@ -329,6 +329,18 @@
     if (/remote|distance|teletravail|virtual|virtuel/.test(value)) return "remote";
     if (/in person|on.?site|presentiel|sur place|en personne/.test(value)) return "inperson";
     return "";
+  }
+
+  // Best CV document for a suggestion like "en_fullstack": exact base first, then language + track words in the name.
+  function pickCv(names, suggestion) {
+    if (!suggestion) return { name: names[0], exact: false };
+    const exact = names.find((n) => n.startsWith(`${suggestion}_`) || n === suggestion);
+    if (exact) return { name: exact, exact: true };
+    const [lang, track] = suggestion.split("_");
+    const trackWords = { fullstack: /full.?stack|web|front|back/i, games: /game|jeu/i, normal: /normal|general|software|dev/i }[track] || /$^/;
+    const langWord = lang === "fr" ? /(^|[_\s-])fr([_\s-]|$)|fran/i : /(^|[_\s-])en([_\s-]|$)|engl/i;
+    const scored = names.map((n) => ({ n, score: (langWord.test(n) ? 4 : 0) + (trackWords.test(n) ? 3 : 0) })).sort((a, b) => b.score - a.score);
+    return { name: scored[0]?.score ? scored[0].n : names[0], exact: false };
   }
 
   function scorePosting(parsed, prefs = DEFAULT_PREFS) {
@@ -411,6 +423,6 @@
 
   return {
     FIELD_ALIASES, fieldForLabel, normalizeLabel, detectLanguage, recommendTrack, parseDocuments, parseMethod, parseDate, daysUntil,
-    parsePosting, isLikelyPosting, jobFileStem, mailtoFor, DEFAULT_PREFS, scorePosting, filterPosting, isSubmitted, provinceName, locationOf, workFormat, trackerRow, trackerCsv, TRACKER_COLUMNS, slug
+    parsePosting, isLikelyPosting, jobFileStem, mailtoFor, DEFAULT_PREFS, scorePosting, filterPosting, isSubmitted, provinceName, locationOf, workFormat, pickCv, trackerRow, trackerCsv, TRACKER_COLUMNS, slug
   };
 });

@@ -279,3 +279,6 @@ button.small { width: auto; margin: 0; padding: 4px 9px; font-size: 11px; }
 .job-status:empty { display: none; }
 .job-status.starred { color: #7a5600; }
 .job-status.done { color: #14632b; }
+.write-all { width: 100%; margin-top: 6px; }
+.footer-links { margin: 14px 0 0; text-align: right; font-size: 11px; }
+.footer-links a { color: var(--muted); }

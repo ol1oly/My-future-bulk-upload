@@ -79,7 +79,7 @@
         const { [APPLICANT_KEY]: applicant = "" } = await chrome.storage.local.get(APPLICANT_KEY);
         const mailto = new URL(JobTools.mailtoFor(parsed, applicant || "Your Name"));
         await navigator.clipboard.writeText(`To: ${parsed.apply.emails[0]}\nSubject: ${mailto.searchParams.get("subject")}\n\n${mailto.searchParams.get("body")}`);
-        copy.textContent = "Copied — attach files yourself";
+        copy.textContent = "Copied. Attach the files yourself.";
       });
       actions.append(copy);
     }

@@ -215,7 +215,7 @@
       const target = apps.find((app) => String(app.postingId) === String(plan.probeApply)) || apps[0];
       log.steps.push({ step: "probe", result: await probeApply(tabId, target.board || "internshipscoop", target.postingId) });
     }
-    return finish(tabId, log, dryRun ? "Check finished — nothing was saved." : (log.problem || "Done."));
+    return finish(tabId, log, dryRun ? "Check finished. Nothing was saved." : (log.problem || "Done."));
   }
 
   async function finish(tabId, log, message) {
@@ -298,7 +298,7 @@
     if (!targets.length) throw new Error("No prepared application is waiting (run Prepare first).");
     const opened = [], failed = [];
     for (const [index, app] of targets.entries()) {
-      note(tabId, `Opening application form ${index + 1}/${targets.length}: ${app.organization} — ${app.title}`);
+      note(tabId, `Opening application form ${index + 1}/${targets.length}: ${app.organization}: ${app.title}`);
       try {
         const tab = await openFormTab(app, { active: index === 0 });
         opened.push(app.postingId);
@@ -428,7 +428,7 @@
     return { message: "Opened the posting in a new tab." };
   }
 
-  // Full posting text from myFuture (hidden frame), parsed — for writing a cover letter about it.
+  // Full posting text from myFuture (hidden frame), parsed, for writing a cover letter about it.
   async function postingDetails(tabId, item) {
     await ensureFrameOps(tabId);
     const engine = [await ownFile("lib/jobs.js"), await ownFile("orbis-board.js")];
@@ -456,9 +456,10 @@
     const details = await postingDetails(tabId, item);
     const posting = { ...details, postingId: String(item.postingId), title: details.title || item.title, organization: details.organization || item.organization };
     note(tabId, "Claude is writing the sentence for this posting…");
-    const { sentence } = await host({ cmd: "draftLetter", posting });
-    note(tabId, "Review Claude's sentence, then press Create package.");
-    return { sentence, posting: { ...posting, description: undefined, qualifications: undefined } };
+    const draft = await host({ cmd: "draftLetter", posting });
+    note(tabId, draft.issues?.length ? `Review the letter: ${draft.issues.join("; ")}.` : "Review the letter, then create the package.");
+    return { text: draft.text, style: draft.style, issues: draft.issues || [], model: draft.model, cv: details.cv, documents: details.documents,
+      posting: { ...posting, style: draft.style, description: undefined, qualifications: undefined } };
   }
 
   // Find matches: read the board, rank by keywords (everyone); with Claude Code + a profile, Claude picks the best of the
@@ -489,7 +490,7 @@
     const { [HIDDEN_KEY]: hidden = [] } = await chrome.storage.local.get({ [HIDDEN_KEY]: [] });
     await chrome.storage.local.set({ mstSuggested: suggested, [HIDDEN_KEY]: hidden.filter((id) => !suggested[id]) });
     chrome.runtime.sendMessage({ type: "BRIDGE_APPS" }).catch(() => {});
-    const message = `${Object.keys(suggested).length} suggestion(s) ${by === "claude" ? "picked by Claude" : "by keyword match"} — see the Suggested filter.`;
+    const message = `${Object.keys(suggested).length} suggestion(s) ${by === "claude" ? "picked by Claude" : "by keyword match"}. See the Suggested filter.`;
     note(tabId, message);
     return { message };
   }
@@ -522,9 +523,9 @@
     const docs = await inPage(tabId, async () => [await window.__mfFrame.listDocs("Application Packages"), await window.__mfFrame.listDocs("Cover Letter")]);
     for (let n = 2; docs[0].some((d) => d.name === packageName); n += 1) packageName = `${base}_${org}${n}_${day}`;
     let letterName = choice.coverLetter || "";
-    if (choice.claude?.sentence) {
+    if (choice.claude?.text) {
       note(tabId, "Making the cover letter PDF (Word, up to a minute)…");
-      const made = await host({ cmd: "fillLetter", posting: { ...choice.claude.posting, postingId: String(item.postingId) }, sentence: choice.claude.sentence });
+      const made = await host({ cmd: "fillLetter", posting: { ...choice.claude.posting, postingId: String(item.postingId) }, text: choice.claude.text });
       const file = await host({ cmd: "readFile", path: made.pdf });
       choice.letterFile = { name: file.name, base64: file.base64 };
     }
@@ -625,7 +626,7 @@
       BRIDGE_DRAFT_LETTER: () => draftLetter(message.tabId, message.item),
       BRIDGE_RECOMMEND: () => recommend(message.tabId, message.item),
       BRIDGE_FIND_MATCHES: () => findMatches(message.tabId, message.board),
-      BRIDGE_PREVIEW_LETTER: () => host({ cmd: "previewLetter", posting: message.posting, sentence: message.sentence }),
+      BRIDGE_PREVIEW_LETTER: () => host({ cmd: "previewLetter", posting: message.posting, text: message.text }),
       BRIDGE_VIEW_LETTER: () => viewLetter(String(message.postingId)),
       BRIDGE_VIEW_FILE: () => viewFile(message.file)
     };

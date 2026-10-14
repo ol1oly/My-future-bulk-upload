@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cover letters for all</title>
+    <style>
+      :root { --ink: #16181d; --muted: #68707d; --line: #e3e5e8; --red: #ed1b2f; --surface: #f6f7f8; }
+      body { margin: 0; background: var(--surface); color: var(--ink); font: 14px/1.5 system-ui, "Segoe UI", sans-serif; }
+      main { max-width: 900px; margin: 0 auto; padding: 24px 16px 60px; }
+      h1 { font-size: 22px; margin: 0 0 4px; }
+      p.note { color: var(--muted); margin: 4px 0; }
+      .bar { position: sticky; top: 0; z-index: 2; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 12px 0; background: var(--surface); }
+      .bar .status { flex: 1; font-weight: 600; min-width: 200px; }
+      .bad { color: #c4122d; }
+      button { border: 0; border-radius: 8px; padding: 9px 14px; background: var(--red); color: #fff; font: inherit; font-weight: 650; cursor: pointer; }
+      button.secondary { background: #fff; color: var(--ink); border: 1px solid #d8dade; }
+      button.link { background: none; color: var(--muted); padding: 2px 0; text-decoration: underline; font-weight: 500; }
+      button:disabled { opacity: .55; cursor: wait; }
+      .card { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-top: 12px; }
+      .card.done { opacity: .7; }
+      .head { display: flex; gap: 10px; align-items: flex-start; }
+      .head strong { font-size: 15px; }
+      .meta { color: var(--muted); font-size: 12px; }
+      .fields { display: grid; grid-template-columns: 1fr auto; gap: 8px 12px; margin-top: 10px; align-items: center; }
+      select { padding: 6px 8px; border: 1px solid #cdd1d6; border-radius: 6px; font: inherit; }
+      textarea { width: 100%; box-sizing: border-box; margin-top: 8px; padding: 8px 10px; border: 1px solid #cdd1d6; border-radius: 8px; font: inherit; resize: vertical; }
+      pre { white-space: pre-wrap; font: 12.5px/1.5 system-ui, sans-serif; background: var(--surface); border-radius: 8px; padding: 10px; }
+      .state { font-size: 12px; font-weight: 650; }
+      .state.ok { color: #14632b; }
+      .issues { color: #7a5600; font-size: 12px; margin-top: 4px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Cover letters for all</h1>
+      <p class="note">Your active postings that don't have a package yet. <b>Write letters</b> asks Claude for each one
+        (about 15 s each), following your <a href="#" id="settings">cover letter settings</a>. Read and edit them, then
+        <b>Build packages</b> makes each PDF, uploads it and creates the package (about a minute each). Nothing is submitted.</p>
+      <div class="bar">
+        <button id="write" type="button">Write letters</button>
+        <button id="build" type="button" class="secondary">Build packages</button>
+        <span id="status" class="status"></span>
+      </div>
+      <div id="list"></div>
+    </main>
+    <script src="lib/jobs.js"></script>
+    <script src="letters.js"></script>
+  </body>
+</html>

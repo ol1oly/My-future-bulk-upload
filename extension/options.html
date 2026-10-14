@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cover letter settings</title>
+    <style>
+      :root { --ink: #16181d; --muted: #68707d; --line: #e3e5e8; --red: #ed1b2f; --surface: #f6f7f8; }
+      body { margin: 0; background: #fff; color: var(--ink); font: 14px/1.5 system-ui, "Segoe UI", sans-serif; }
+      main { max-width: 760px; margin: 0 auto; padding: 28px 16px 60px; }
+      h1 { font-size: 22px; margin: 0 0 4px; }
+      h2 { font-size: 16px; margin: 28px 0 6px; }
+      p.note, small { color: var(--muted); }
+      label { display: block; font-weight: 600; margin: 14px 0 4px; }
+      label.inline { display: flex; gap: 8px; align-items: flex-start; font-weight: 500; margin: 6px 0; }
+      textarea, select, input[type=text] { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid #cdd1d6; border-radius: 8px; font: inherit; }
+      textarea { resize: vertical; }
+      select { width: auto; min-width: 200px; }
+      button { border: 0; border-radius: 8px; padding: 9px 14px; background: var(--red); color: #fff; font: inherit; font-weight: 650; cursor: pointer; }
+      button.secondary { background: #fff; color: var(--ink); border: 1px solid #d8dade; }
+      button:disabled { opacity: .55; cursor: wait; }
+      .row { display: flex; gap: 10px; align-items: center; margin-top: 16px; flex-wrap: wrap; }
+      .status { font-weight: 600; }
+      .status.bad { color: #c4122d; }
+      .box { border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; background: var(--surface); }
+      #digest { min-height: 260px; font: 12.5px/1.5 Consolas, monospace; background: #fff; }
+      #warning { display: none; }
+      #warning.show { display: block; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Cover letter settings</h1>
+      <p class="note">How Claude writes your cover letters, for every posting. Saved in one file that Claude Code reads too
+        (<code>~/.claude/myfuture/letter-settings.json</code>), so you can change it here or by asking Claude.</p>
+      <p id="warning" class="box status bad"></p>
+
+      <h2>How the letter is written</h2>
+      <label class="inline"><input type="radio" name="style" value="template" /> <span><b>Follow my template.</b> Your letter stays as you wrote it; Claude only writes the part about this posting.</span></label>
+      <label class="inline"><input type="radio" name="style" value="free" /> <span><b>Free form.</b> Claude writes the body from your facts; your greeting, layout and signature stay.</span></label>
+
+      <label for="instructions">Instructions, in your own words</label>
+      <textarea id="instructions" rows="5" placeholder="For example: Keep it under 250 words. Mention that I would be proud to work for a Canadian company. Always bring up my game projects for studio roles. Don't mention my Costco job."></textarea>
+
+      <label for="model">Model</label>
+      <select id="model"></select>
+      <small>Sonnet is a good default. Opus writes more carefully but is slower; Haiku is fastest.</small>
+
+      <label for="banned">Words or phrases to avoid (one per line)</label>
+      <textarea id="banned" rows="3" placeholder="synergy&#10;go-getter"></textarea>
+      <small>Common machine-sounding phrases (like "I am excited to" or long dashes) are already avoided.</small>
+
+      <h2>Where the facts come from</h2>
+      <p class="note">Claude only states facts it finds here. Press <b>Refresh sources</b> after changing them, then read
+        the summary below; letters are written from it.</p>
+      <label class="inline"><input type="checkbox" id="cvHistory" /> <span>Use my CV history <small id="cvFolder"></small></span></label>
+      <label for="paths">Folders or files on this computer (one per line)</label>
+      <textarea id="paths" rows="3" placeholder="C:\Users\you\Documents\Jobs\projects"></textarea>
+      <small>PDF, Markdown and text files. Pick specific folders, not your whole drive.</small>
+      <label for="links">Links (one per line)</label>
+      <textarea id="links" rows="3" placeholder="https://your-site.github.io&#10;https://github.com/you"></textarea>
+      <small>Public https pages only. Pages that need you to sign in (like LinkedIn) don't work.</small>
+
+      <div class="row">
+        <button id="save" type="button">Save settings</button>
+        <span id="saveStatus" class="status"></span>
+      </div>
+
+      <h2>Facts summary</h2>
+      <div class="row" style="margin-top:0">
+        <button id="refresh" type="button" class="secondary">Refresh sources</button>
+        <span id="refreshStatus" class="status"></span>
+      </div>
+      <p class="note">Built from your sources (about a minute). Edit it freely: remove anything wrong or outdated, then save.</p>
+      <textarea id="digest" spellcheck="false"></textarea>
+      <div class="row">
+        <button id="saveDigest" type="button" class="secondary">Save summary</button>
+        <span id="digestStatus" class="status"></span>
+      </div>
+    </main>
+    <script src="options.js"></script>
+  </body>
+</html>
