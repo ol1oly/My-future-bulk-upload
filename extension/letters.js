@@ -4,9 +4,9 @@
   "use strict";
   const $ = (sel) => document.querySelector(sel);
   const listEl = $("#list"), statusEl = $("#status"), writeBtn = $("#write"), makeBtn = $("#make"), buildBtn = $("#build");
-  const letterText = (reply) => reply?.text ?? reply?.sentence ?? "";
+  const { letterText } = JobTools;
   const pdfCurrent = (b) => Boolean(b?.pdf && b.pdfText === b.text);
-  let myFutureTab = null, docs = null, postings = [], batch = {};
+  let myFutureTab = null, docs = null, postings = [], batch = {}, busy = false;
 
   const el = (tag, props = {}, ...children) => {
     const node = Object.assign(document.createElement(tag), props);
@@ -17,6 +17,8 @@
   const send = (message) => chrome.runtime.sendMessage({ ...message, tabId: myFutureTab?.id });
   const saveBatch = () => chrome.storage.local.set({ mstBatch: batch });
   const newest = (list) => [...(list || [])].sort().reverse();
+  const entry = (id) => (batch[id] ||= {});
+  const itemOf = (p) => ({ postingId: p.postingId, board: p.board || "internshipscoop", title: p.title, organization: p.organization });
 
   // Same sources as My postings: shortlist, suggestions, saved postings and planned applications without a package.
   async function load() {
@@ -48,20 +50,20 @@
   function card(p) {
     const b = batch[p.postingId] || {};
     const include = el("input", { type: "checkbox", checked: b.include !== false });
-    include.addEventListener("change", () => { batch[p.postingId] = { ...(batch[p.postingId] || {}), include: include.checked }; saveBatch(); render(); });
+    include.addEventListener("change", () => { entry(p.postingId).include = include.checked; saveBatch(); render(); });
     const cv = el("select");
     const pick = JobTools.pickCv(newest(docs?.cvs), b.recommendedCv || "");
     const cvs = newest(docs?.cvs);
     const ordered = pick.name ? [pick.name, ...cvs.filter((n) => n !== pick.name)] : cvs;
     for (const name of ordered) cv.append(el("option", { value: name, textContent: name + (name === pick.name && b.recommendedCv ? " (recommended)" : ""), selected: name === (b.cv || pick.name) }));
-    cv.addEventListener("change", () => { batch[p.postingId].cv = cv.value; saveBatch(); });
+    cv.addEventListener("change", () => { entry(p.postingId).cv = cv.value; saveBatch(); });
     const transcript = el("select", {}, el("option", { value: "", textContent: "No transcript" }), ...newest(docs?.transcripts).map((n) => el("option", { value: n, textContent: n })));
     transcript.value = b.transcript ?? (b.documents?.transcript ? newest(docs?.transcripts)[0] || "" : "");
-    transcript.addEventListener("change", () => { batch[p.postingId].transcript = transcript.value; saveBatch(); });
+    transcript.addEventListener("change", () => { entry(p.postingId).transcript = transcript.value; saveBatch(); });
     const text = el("textarea", { rows: b.style === "free" ? 12 : 4, value: b.text || "", placeholder: "Press Write letters above." });
-    text.addEventListener("input", () => { batch[p.postingId] = { ...(batch[p.postingId] || {}), text: text.value }; saveBatch(); viewBtn.hidden = !pdfCurrent(batch[p.postingId]); });
+    text.addEventListener("input", () => { entry(p.postingId).text = text.value; saveBatch(); viewBtn.hidden = !pdfCurrent(batch[p.postingId]); });
     const change = el("input", { type: "text", placeholder: "What to change (optional), e.g. shorter, mention my game projects" });
-    const rewrite = el("button", { type: "button", className: "secondary", textContent: b.text ? "Rewrite" : "Write", disabled: !myFutureTab });
+    const rewrite = el("button", { type: "button", className: "secondary", textContent: b.text ? "Rewrite" : "Write", disabled: !myFutureTab || busy });
     const viewBtn = el("button", { type: "button", className: "link", textContent: "View PDF", hidden: !pdfCurrent(b) });
     viewBtn.addEventListener("click", () => send({ type: "BRIDGE_VIEW_PATH", path: batch[p.postingId].pdf }));
     rewrite.addEventListener("click", async () => {
@@ -93,7 +95,7 @@
   }
 
   async function writeOne(p, feedback = "", previous = "") {
-    const reply = await send({ type: "BRIDGE_DRAFT_LETTER", item: { postingId: p.postingId, board: p.board || "internshipscoop", title: p.title, organization: p.organization }, feedback, previous });
+    const reply = await send({ type: "BRIDGE_DRAFT_LETTER", item: itemOf(p), feedback, previous });
     batch[p.postingId] = reply?.ok && letterText(reply)
       ? { ...(batch[p.postingId] || {}), text: letterText(reply), style: reply.style, issues: reply.issues, posting: reply.posting, recommendedCv: reply.cv, documents: reply.documents, status: "drafted", pdf: "", pdfError: "" }
       : { ...(batch[p.postingId] || {}), status: "error", error: reply?.error || "Claude's answer came back empty; reload the extension on chrome://extensions" };
@@ -106,12 +108,14 @@
     lock(true);
     try {
       say(`Making ${targets.length} PDF(s) with Word…`);
-      const reply = await send({ type: "BRIDGE_MAKE_LETTERS", items: targets.map((p) => ({ postingId: p.postingId, posting: batch[p.postingId].posting, text: batch[p.postingId].text })) });
+      // The text sent to Word, not the textarea when Word answers: the student may edit while it runs.
+      const sent = new Map(targets.map((p) => [p.postingId, batch[p.postingId].text]));
+      const reply = await send({ type: "BRIDGE_MAKE_LETTERS", items: targets.map((p) => ({ ...itemOf(p), posting: batch[p.postingId].posting, text: sent.get(p.postingId) })) });
       if (!reply?.ok) { say(`Stopped: ${reply?.error || "no answer"}`, true); return; }
       for (const r of reply.results) {
         const b = batch[r.postingId];
         if (!b) continue;
-        if (r.ok) Object.assign(b, { pdf: r.pdf, pdfText: b.text, pdfError: "" }); else Object.assign(b, { pdf: "", pdfError: r.error || "failed" });
+        if (r.ok) Object.assign(b, { pdf: r.pdf, pdfText: sent.get(r.postingId), pdfError: "" }); else Object.assign(b, { pdf: "", pdfError: r.error || "failed" });
       }
       await saveBatch();
       render();
@@ -119,7 +123,11 @@
     } finally { lock(false); }
   }
 
-  function lock(on) { writeBtn.disabled = makeBtn.disabled = buildBtn.disabled = on || !myFutureTab; }
+  function lock(on) {
+    busy = on;
+    writeBtn.disabled = makeBtn.disabled = buildBtn.disabled = on || !myFutureTab;
+    render();
+  }
 
   async function writeAll() {
     const targets = postings.filter((p) => (batch[p.postingId]?.include !== false) && !batch[p.postingId]?.text);
@@ -145,7 +153,7 @@
         const cv = b.cv || JobTools.pickCv(newest(docs?.cvs), b.recommendedCv || "").name;
         const transcript = b.transcript ?? (b.documents?.transcript ? newest(docs?.transcripts)[0] || "" : "");
         say(`Uploading ${i + 1} of ${targets.length}: ${p.organization} (${pdfCurrent(b) ? "your PDF" : "making the PDF first"}, then the package)…`);
-        const reply = await send({ type: "BRIDGE_PREPARE_ONE", item: { postingId: p.postingId, board: p.board || "internshipscoop", title: p.title, organization: p.organization },
+        const reply = await send({ type: "BRIDGE_PREPARE_ONE", item: itemOf(p),
           choice: { cv, transcript, coverLetter: "", claude: { text: b.text, posting: b.posting, pdf: pdfCurrent(b) ? b.pdf : "" } } });
         batch[p.postingId] = reply?.ok ? { ...b, status: "built", packageName: reply.packageName } : { ...b, status: "error", error: reply?.error || "no answer" };
         await saveBatch();
@@ -165,7 +173,7 @@
     makeBtn.addEventListener("click", makeAll);
     buildBtn.addEventListener("click", buildAll);
     const status = await chrome.runtime.sendMessage({ type: "BRIDGE_STATUS" });
-    if (status && status.api !== 4) say("The extension's background part is out of date. Open chrome://extensions and press the reload icon on myFuture Toolkit, then reopen this.", true);
+    if (status && status.api !== JobTools.BRIDGE_API) say("The extension's background part is out of date. Open chrome://extensions and press the reload icon on myFuture Toolkit, then reopen this.", true);
     await load();
   }
 

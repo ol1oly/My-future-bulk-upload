@@ -44,11 +44,12 @@ def prompt_rules(language="en"):
     return PROMPT_RULES + ", ".join(f'"{w}"' for w in banned) + "."
 
 
-def issues(text, language="en"):
-    """Return a list of short descriptions of tells found in the text (empty list = clean)."""
+def issues(text, language="en", extra=()):
+    """Return a list of short descriptions of tells found in the text (empty list = clean). `extra`: the student's own
+    banned words, matched as whole words like the built-in lists."""
     found = []
     norm = _norm(text)
-    for word in (BANNED_FR if language == "fr" else BANNED_EN):
+    for word in [*(BANNED_FR if language == "fr" else BANNED_EN), *(_norm(w).strip() for w in extra if str(w or "").strip())]:
         if re.search(r"(?<![\w-])" + re.escape(word) + r"(?![\w-])", norm):
             found.append(f'uses "{word}"')
     if re.search(r"[—–]| -- ", text or ""):

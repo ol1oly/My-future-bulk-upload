@@ -30,7 +30,7 @@ Read only when the fast path in SKILL.md fails.
 - Replaying that form with fetch works ONLY if no other page load (e.g. a GET of documents.htm to read counts) happened
   since the list rendered; otherwise the server returns 200 and does nothing. Delete everything first, verify after.
 - Anything used in a submitted application is refused: "Document is used in an application and cannot be deleted"
-  (same for native deletes). Olivier's 11 pre-2026-09-13 packages are in that state.
+  (same for native deletes), e.g. any package already sent with an application.
 - "Archive Selected" (Actions menu) is refused for everything: "0 documents updated. N documents were not updated because
   they are default documents or are not allowed to be archived."
 

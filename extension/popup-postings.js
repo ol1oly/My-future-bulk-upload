@@ -20,8 +20,7 @@
     return node;
   };
   const send = (message) => chrome.runtime.sendMessage({ ...message, tabId: tab?.id });
-  const EXPECTED_API = 4; // must match BRIDGE_API in bridge.js
-  const letterText = (reply) => reply?.text ?? reply?.sentence ?? "";
+  const { letterText } = JobTools;
   const lettersReady = () => Boolean(bridge?.letters && Object.values(bridge.letters).every(Boolean));
 
   function say(text, bad = false) {
@@ -240,8 +239,8 @@
       try {
         const reply = await send({ type: "BRIDGE_DRAFT_LETTER", item: ref, feedback, previous: state.drafted ? sentence.value : "" });
         if (!reply?.ok) { say(`Claude couldn't write it: ${reply?.error || "no answer"}`, true); return; }
-        state.drafted = reply.posting;
         if (!letterText(reply)) { say("Claude's answer came back empty. Reload the extension on chrome://extensions and try again.", true); return; }
+        state.drafted = reply.posting;
         state.sentence = sentence.value = letterText(reply);
         state.pdf = "";
         change.value = "";
@@ -255,11 +254,12 @@
     makePdf.addEventListener("click", async () => {
       makePdf.disabled = true; makePdf.textContent = "Making PDF…";
       try {
-        const reply = await send({ type: "BRIDGE_MAKE_LETTERS", items: [{ postingId: ref.postingId, posting: state.drafted, text: sentence.value }] });
+        const sent = sentence.value; // the student may keep editing while Word runs
+        const reply = await send({ type: "BRIDGE_MAKE_LETTERS", items: [{ ...ref, posting: state.drafted, text: sent }] });
         const result = reply?.results?.[0];
         if (!reply?.ok || !result?.ok) { say(`The PDF failed: ${result?.error || reply?.error || "no answer"}`, true); return; }
         state.pdf = result.pdf;
-        state.pdfText = sentence.value;
+        state.pdfText = sent;
         say("PDF ready. View it; rewrite if needed, or upload it.");
         await send({ type: "BRIDGE_VIEW_PATH", path: state.pdf });
       } finally { makePdf.disabled = false; makePdf.textContent = "Make PDF again"; showPdfButtons(); }
@@ -340,7 +340,7 @@
 
   async function initClaude() {
     bridge = await send({ type: "BRIDGE_STATUS" });
-    if (bridge && bridge.api !== EXPECTED_API) say("The extension's background part is out of date. Open chrome://extensions and press the reload icon on myFuture Toolkit, then reopen this.", true);
+    if (bridge && bridge.api !== JobTools.BRIDGE_API) say("The extension's background part is out of date. Open chrome://extensions and press the reload icon on myFuture Toolkit, then reopen this.", true);
     if (!bridge?.ok) { bridge = null; return; }
     refreshClaude();
     if (onMyFuture) claudeRun.addEventListener("click", () => run(claudeRun, { type: "BRIDGE_RUN_PLAN" }, "Working…"));

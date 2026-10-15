@@ -175,18 +175,32 @@ def rank_postings(candidates):
     return [{"postingId": str(p["postingId"]), "reason": re.sub(r"\s+", " ", str(p.get("reason", "")))[:200]} for p in picks[:8]]
 
 
+def run_powershell(script, *args, timeout):
+    """Runs a script in ../apply. The scripts print UTF-8 (Windows PowerShell would otherwise use the OEM code page)."""
+    return subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(REPO / "apply" / script), *args],
+                          capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
+
+
 def body_template(cfg, posting):
     """Free-form letters use <lang>_body.docx: the student's own letter with everything between the greeting and the
     signature replaced by one [BODY] slot. Made once from their template (keeps fonts, margins, signature)."""
     lang = "fr" if str(posting.get("template", "")).startswith("fr") else "en"
     target = cfg["templates"] / f"{lang}_body.docx"
-    if not target.is_file():
+    try:
+        usable = target.is_file() and "[BODY]" in docx_text(target)
+    except (OSError, KeyError, ValueError):  # unreadable or not a .docx: make it again
+        usable = False
+    if not usable:
         source = template_for(cfg, posting.get("template"))
-        result = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(REPO / "apply" / "make_body_template.ps1"),
-                                 "-Source", str(source), "-Out", str(target)], capture_output=True, text=True, timeout=180)
+        result = run_powershell("make_body_template.ps1", "-Source", str(source), "-Out", str(target), timeout=180)
         if not target.is_file():
             raise RuntimeError(f"Couldn't make the free-form template ({(result.stdout or result.stderr).strip()[-200:]})")
     return target
+
+
+def with_style(posting):
+    """Letters the student typed without a Claude draft carry no style: use the one from Cover letter settings."""
+    return {**posting, "style": posting.get("style") or letter_settings.load()["style"]}
 
 
 def slots_for(posting, text):
@@ -203,11 +217,12 @@ def slots_for(posting, text):
 
 def preview_letter(posting, text):
     cfg = jobs_config()
+    posting = with_style(posting)
     source = body_template(cfg, posting) if posting.get("style") == "free" else template_for(cfg, posting.get("template"))
     letter = docx_text(source)
     for slot, value in slots_for(posting, text).items():
         letter = letter.replace(f"[{slot}]", value.replace("\r", "\n\n"))
-    return letter.replace("..", ".")
+    return re.sub(r"(?<!\.)\.\.(?!\.)", ".", letter)  # "[SLOT]." after text ending in "." (keeps "...")
 
 
 FREE_PROMPT = (
@@ -258,6 +273,8 @@ def draft_letter(posting):
     if posting.get("feedback") and posting.get("previous"):
         prompt += (f"\n\nThe student read this draft:\n{str(posting['previous'])[:4000]}\n"
                    f"Rewrite it with this change (their words): {str(posting['feedback'])[:800]}")
+    elif posting.get("feedback"):
+        prompt += f"\n\nThe student's request for this letter (their words): {str(posting['feedback'])[:800]}"
     elif posting.get("previous"):
         prompt += f"\n\nWrite a different version from this earlier draft:\n{str(posting['previous'])[:4000]}"
 
@@ -268,10 +285,10 @@ def draft_letter(posting):
         return letter_style.clean_dashes(re.sub(r"[ \t]+", " ", text).strip().strip('"'))
 
     text = ask()
-    found = letter_style.issues(text, lang) + [f'uses "{w}"' for w in settings["extraBanned"] if w and w in text.lower()]
+    found = letter_style.issues(text, lang, settings["extraBanned"])
     if found:  # one rewrite with the exact problems named
         text = ask(f"\n\nYour previous draft had these problems; rewrite without them: {'; '.join(found)}.\nPrevious draft:\n{text}")
-        found = letter_style.issues(text, lang) + [f'uses "{w}"' for w in settings["extraBanned"] if w and w in text.lower()]
+        found = letter_style.issues(text, lang, settings["extraBanned"])
     if style != "free":
         text = text.rstrip(".").strip()
         if not 5 <= len(text.split()) <= 90 or "[" in text:
@@ -283,13 +300,26 @@ def draft_letter(posting):
 
 
 def letter_job(cfg, posting, text):
+    if not str(posting.get("title") or "").strip() or not str(posting.get("organization") or "").strip():
+        raise RuntimeError("the posting's title or company is missing; press Write (or Rewrite) for this letter first")
     template = body_template(cfg, posting) if posting.get("style") == "free" else template_for(cfg, posting.get("template"))
     org = re.sub(r"[^A-Za-z0-9]+", "", str(posting.get("organization") or "Job"))[:24] or "Job"
     folder = cfg["applications"] / f"{dt.date.today().isoformat()}_{org}_{re.sub(r'[^0-9]', '', str(posting.get('postingId', '')))}"
     folder.mkdir(parents=True, exist_ok=True)
     slots = folder / "slots.json"
     slots.write_text(json.dumps(slots_for(posting, text), ensure_ascii=False, indent=1), encoding="utf-8")
-    return {"id": str(posting.get("postingId", "")), "template": str(template), "outStem": str(folder / f"Cover_Letter_{org}"), "slotsJson": str(slots)}
+    # A new file name each run: a failed or concurrent run must never overwrite a PDF a page already showed as reviewed.
+    stem = folder / f"Cover_Letter_{org}_{dt.datetime.now().strftime('%H%M%S%f')[:-3]}"
+    return {"id": str(posting.get("postingId", "")), "template": str(template), "outStem": str(stem), "slotsJson": str(slots)}
+
+
+def kill_word(pid_file):
+    """Ends the Word process fill_letter.ps1 started (it writes the pid). Never touches a Word the student opened."""
+    try:
+        pid = int(pid_file.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return
+    subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True, timeout=30)
 
 
 def remember_generated(paths):
@@ -307,19 +337,30 @@ def fill_letters(items):
     jobs, results = [], []
     for item in items:
         try:
-            jobs.append(letter_job(cfg, item.get("posting") or {}, item.get("text", "")))
+            jobs.append(letter_job(cfg, with_style(item.get("posting") or {}), item.get("text", "")))
         except Exception as error:  # e.g. missing template: report for this letter only
             results.append({"postingId": str((item.get("posting") or {}).get("postingId", "")), "ok": False, "error": str(error)})
     if jobs:
-        batch = HOME / "fill-batch.json"
+        # One file per request: Chrome starts a host process per message, so two requests can run at once.
+        tag = f"{os.getpid()}-{dt.datetime.now().strftime('%H%M%S%f')}"
+        batch, pid_file = HOME / f"fill-batch-{tag}.json", HOME / f"word-{tag}.pid"
+        HOME.mkdir(parents=True, exist_ok=True)
         batch.write_text(json.dumps(jobs, ensure_ascii=False), encoding="utf-8")
-        run = subprocess.run(
-            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(REPO / "apply" / "fill_letter.ps1"), "-BatchJson", str(batch)],
-            capture_output=True, text=True, timeout=90 + 45 * len(jobs))
-        lines = [json.loads(l) for l in run.stdout.splitlines() if l.strip().startswith("{")]
+        try:
+            run = run_powershell("fill_letter.ps1", "-BatchJson", str(batch), "-PidFile", str(pid_file), timeout=90 + 45 * len(jobs))
+            stdout, stderr = run.stdout, run.stderr
+        except subprocess.TimeoutExpired as timeout:
+            # Only powershell.exe is killed on timeout; Word runs as its own COM process and would keep files locked.
+            kill_word(pid_file)
+            stdout = timeout.stdout.decode("utf-8", "replace") if isinstance(timeout.stdout, bytes) else (timeout.stdout or "")
+            stderr = "Word took too long (a hidden dialog or a slow OneDrive file?) and was closed"
+        finally:
+            for leftover in (batch, pid_file):
+                leftover.unlink(missing_ok=True)
+        lines = [json.loads(l) for l in stdout.splitlines() if l.strip().startswith("{")]
         by_id = {l.get("id"): l for l in lines}
         for job in jobs:
-            report = by_id.get(job["id"]) or {"ok": False, "error": (lines[-1].get("error") if lines else run.stderr[:200]) or "Word did not answer"}
+            report = by_id.get(job["id"]) or {"ok": False, "error": (lines[-1].get("error") if lines else stderr[:200]) or "Word did not answer"}
             results.append({"postingId": job["id"], "ok": bool(report.get("ok")), "pdf": report.get("pdf"), "pages": report.get("pages"), "error": report.get("error")})
     remember_generated(r["pdf"] for r in results if r.get("ok") and r.get("pdf"))
     return results

@@ -6,13 +6,12 @@
  * "com.mcgill_student_toolkit.bridge" (native/mst_bridge.py). Every job starts from a click in the popup.
  * Nothing here submits an application.
  */
+importScripts("lib/jobs.js");
 (() => {
   "use strict";
 
   const HOST = "com.mcgill_student_toolkit.bridge";
-  // Bump when messages between the pages and this service worker change. Unpacked extensions reload pages on every
-  // open but keep this worker running old code until the extension is reloaded; pages compare this number.
-  const BRIDGE_API = 4;
+  const BRIDGE_API = JobTools.BRIDGE_API; // pages compare it with their own copy of lib/jobs.js
   const BOARDS = { internshipscoop: "/myAccount/opportunities/internshipscoop/postings.htm", career: "/myAccount/opportunities/career/postings.htm" };
   const DATED = /_\d{4}-\d{2}-\d{2}$/;
   const progress = new Map(); // tabId -> latest progress line
@@ -466,14 +465,28 @@
       posting: { ...posting, style: draft.style, description: undefined, qualifications: undefined, feedback: undefined, previous: undefined } };
   }
 
+  // The posting fields the Word template needs (role, company, greeting, template). A letter the student typed without
+  // a Claude draft has none yet, so read them from myFuture.
+  async function letterPosting(tabId, item, posting) {
+    if (posting?.title && posting?.organization) return { ...posting, postingId: String(item.postingId) };
+    const d = await postingDetails(tabId, item);
+    return { ...(posting || {}), postingId: String(item.postingId), title: d.title || item.title, organization: d.organization || item.organization,
+      template: d.template, salutation: d.salutation };
+  }
+
   // Make the PDFs only (no upload): one Word session per chunk of up to 6 letters.
   async function makeLetters(tabId, items) {
     const results = [];
     for (let i = 0; i < items.length; i += 6) {
       const chunk = items.slice(i, i + 6);
       note(tabId, `Making PDFs ${i + 1}-${i + chunk.length} of ${items.length} (Word starts once per group)…`);
-      const reply = await host({ cmd: "fillLetters", items: chunk.map((it) => ({ posting: { ...it.posting, postingId: String(it.postingId) }, text: it.text })) });
-      results.push(...reply.results);
+      try {
+        const jobs = [];
+        for (const it of chunk) jobs.push({ posting: await letterPosting(tabId, it, it.posting), text: it.text });
+        results.push(...(await host({ cmd: "fillLetters", items: jobs })).results);
+      } catch (error) { // keep the PDFs earlier groups made; mark this group as failed
+        results.push(...chunk.map((it) => ({ postingId: String(it.postingId), ok: false, error: error.message || String(error) })));
+      }
     }
     const ok = results.filter((r) => r.ok).length;
     const message = `${ok} of ${items.length} PDF(s) made${ok < items.length ? "; see the ones marked in red" : ""}. View them, then upload.`;
@@ -551,7 +564,7 @@
       let pdf = choice.claude.pdf; // already made and viewed: upload exactly that file
       if (!pdf) {
         note(tabId, "Making the cover letter PDF (Word, up to a minute)…");
-        pdf = (await host({ cmd: "fillLetter", posting: { ...choice.claude.posting, postingId: String(item.postingId) }, text: choice.claude.text })).pdf;
+        pdf = (await host({ cmd: "fillLetter", posting: await letterPosting(tabId, item, choice.claude.posting), text: choice.claude.text })).pdf;
       }
       const file = await host({ cmd: "readFile", path: pdf });
       choice.letterFile = { name: file.name, base64: file.base64 };

@@ -421,8 +421,14 @@
     return `${[TRACKER_COLUMNS.join(","), ...rows.map((row) => TRACKER_COLUMNS.map((key) => csvCell(row[key])).join(","))].join("\r\n")}\r\n`;
   }
 
+  // Bump when messages between the extension pages and bridge.js change. Unpacked extensions reload pages on every open
+  // but keep the service worker running old code until the extension is reloaded; pages compare this number.
+  const BRIDGE_API = 5;
+  // Letter text from a bridge reply (older hosts answered with "sentence").
+  const letterText = (reply) => reply?.text ?? reply?.sentence ?? "";
+
   return {
-    FIELD_ALIASES, fieldForLabel, normalizeLabel, detectLanguage, recommendTrack, parseDocuments, parseMethod, parseDate, daysUntil,
+    BRIDGE_API, letterText, FIELD_ALIASES, fieldForLabel, normalizeLabel, detectLanguage, recommendTrack, parseDocuments, parseMethod, parseDate, daysUntil,
     parsePosting, isLikelyPosting, jobFileStem, mailtoFor, DEFAULT_PREFS, scorePosting, filterPosting, isSubmitted, provinceName, locationOf, workFormat, pickCv, trackerRow, trackerCsv, TRACKER_COLUMNS, slug
   };
 });

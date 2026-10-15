@@ -3,19 +3,22 @@
 #   powershell -NoProfile -File fill_letter.ps1 -Template <en_fullstack.docx> -OutStem <dir\name> -SlotsJson <slots.json>
 #              [-Forbid "CN,Beenox,Ada"] [-MaxPages 1]
 # Many letters in ONE Word session (Word starts once, so each extra letter takes seconds instead of ~a minute):
-#   powershell -NoProfile -File fill_letter.ps1 -BatchJson <jobs.json>
+#   powershell -NoProfile -File fill_letter.ps1 -BatchJson <jobs.json> [-PidFile <word.pid>]
 #   jobs.json: [ { "template": "...docx", "outStem": "dir\\name", "slotsJson": "slots.json", "forbid": "", "maxPages": 1, "id": "..." } ]
 # slots.json: { "SALUTATION": "Dear Jane Smith,", "ROLE": "...", "COMPANY": "...", "INTEREST_ABOUT_ROLE": "..." }
-# Prints one JSON line per letter: { id, ok, docx, pdf, pages, leftovers, forbidden, error }. Never overwrites a template.
+# Prints one JSON line per letter (UTF-8): { id, ok, docx, pdf, pages, leftovers, forbidden, error }. Never overwrites a template.
+# -PidFile: where to write the id of the Word process this run started, so a caller that times out can end it.
 param(
   [string] $Template,
   [string] $OutStem,
   [string] $SlotsJson,
   [string] $Forbid = "",
   [int] $MaxPages = 1,
-  [string] $BatchJson
+  [string] $BatchJson,
+  [string] $PidFile
 )
 $ErrorActionPreference = "Stop"
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
 
 function Fill-Letter($word, $template, $outStem, $slotsJson, $forbid, $maxPages, $id) {
   $result = [ordered]@{ id = $id; ok = $false; docx = "$outStem.docx"; pdf = "$outStem.pdf"; pages = 0; leftovers = @(); forbidden = @(); error = $null }
@@ -26,21 +29,22 @@ function Fill-Letter($word, $template, $outStem, $slotsJson, $forbid, $maxPages,
     Copy-Item -LiteralPath $template -Destination $result.docx -Force
     $doc = $word.Documents.Open($result.docx)
     foreach ($slot in $slots.PSObject.Properties) {
-      $token = "[$($slot.Name)]"
       $value = [string] $slot.Value
-      # Word's Find spans formatting runs; setting Range.Text avoids the 255-char replace limit and keeps run style.
-      for ($guard = 0; $guard -lt 20; $guard++) {
-        $range = $doc.Content
-        $find = $range.Find
-        $find.ClearFormatting()
-        $find.MatchWildcards = $false
-        if (-not $find.Execute($token)) { break }
-        $range.Text = $value
+      # Templates say "[INTEREST_ABOUT_ROLE]." : when the text already ends with a period, replace the slot's period too.
+      $tokens = @("[$($slot.Name)]")
+      if ($value.EndsWith(".")) { $tokens = @("[$($slot.Name)].") + $tokens }
+      foreach ($token in $tokens) {
+        # Word's Find spans formatting runs; setting Range.Text avoids the 255-char replace limit and keeps run style.
+        for ($guard = 0; $guard -lt 20; $guard++) {
+          $range = $doc.Content
+          $find = $range.Find
+          $find.ClearFormatting()
+          $find.MatchWildcards = $false
+          if (-not $find.Execute($token)) { break }
+          $range.Text = $value
+        }
       }
     }
-    # Templates say "[INTEREST_ABOUT_ROLE]." : avoid a doubled period when the text already ends with one.
-    $range = $doc.Content; $find = $range.Find
-    $null = $find.Execute("..", $false, $false, $false, $false, $false, $true, 1, $false, ".", 2)
 
     $text = $doc.Content.Text
     $result.leftovers = @([regex]::Matches($text, "\[[A-Z_]+\]") | ForEach-Object { $_.Value } | Select-Object -Unique)
@@ -66,7 +70,10 @@ function Fill-Letter($word, $template, $outStem, $slotsJson, $forbid, $maxPages,
 
 $word = $null
 try {
+  $before = @(Get-Process WINWORD -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })
   $word = New-Object -ComObject Word.Application
+  $started = @(Get-Process WINWORD -ErrorAction SilentlyContinue | Where-Object { $before -notcontains $_.Id })
+  if ($PidFile -and $started.Count -eq 1) { [IO.File]::WriteAllText($PidFile, [string] $started[0].Id) }
   $word.Visible = $false
   $word.DisplayAlerts = 0
   if ($BatchJson) {
