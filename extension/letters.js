@@ -99,7 +99,7 @@
       preview.textContent = reply?.ok ? letterText(reply) || "No preview came back." : `Couldn't preview: ${reply?.error || "no answer"}`;
       preview.hidden = false;
     });
-    const state = b.status === "built" ? el("span", { className: "state ok", textContent: `Package ${b.packageName} ready` })
+    const state = b.status === "built" ? el("span", { className: "state ok", textContent: b.packageName ? `Package ${b.packageName} ready` : "Package ready" })
       : b.pdfError && !pdfCurrent(b) ? el("span", { className: "state bad", textContent: `PDF: ${b.pdfError}` })
       : b.status === "error" ? el("span", { className: "state bad", textContent: b.error })
       : documentsOf(p) && !documentsOf(p).coverLetter ? el("span", { className: "state", textContent: "This posting doesn't ask for a cover letter (one is still allowed)." }) : null;

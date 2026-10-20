@@ -12,7 +12,7 @@
   const FILTERS = [["active", "Active"], ["suggested", "Suggested"], ["prepare", "No package yet"], ["ready", "Package ready"], ["submitted", "Submitted"], ["shortlist", "★ Shortlist"]];
   const STAGE_LABEL = { submitted: "Submitted", started: "Started", ready: "Package ready", prepare: "No package yet" };
   let tab = null, onMyFuture = false, bridge = null;
-  let filter = "active", items = [], docs = null, counts = {}, openPrepare = "", armedUntil = 0, hiddenCount = 0, letterFiles = {};
+  let filter = "active", items = [], docs = null, counts = {}, openPrepare = "", armedUntil = 0, hiddenCount = 0, letterFiles = {}, drafts = {};
 
   const el = (tag, props = {}, ...children) => {
     const node = Object.assign(document.createElement(tag), props);
@@ -29,8 +29,10 @@
   }
 
   async function load() {
-    const data = await chrome.storage.local.get({ mstApps: {}, jobTracker: {}, mfBoard: {}, mstHidden: [], mfDocs: null, mfSyncedAt: "", mfCounts: {}, mstSuggested: {}, mstLetterFiles: {} });
+    const data = await chrome.storage.local.get({ mstApps: {}, jobTracker: {}, mfBoard: {}, mstHidden: [], mfDocs: null, mfSyncedAt: "", mfCounts: {}, mstSuggested: {}, mstLetterFiles: {}, mstBatch: {}, mstOpenPrepare: "" });
     letterFiles = data.mstLetterFiles;
+    drafts = data.mstBatch;
+    if (!loaded) { openPrepare = data.mstOpenPrepare; loaded = true; }
     docs = data.mfDocs;
     counts = data.mfCounts;
     hiddenCount = data.mstHidden.length;
@@ -117,7 +119,7 @@
       act(item.stage === "started" ? "Continue" : "Apply", "primary", (b) => run(b, { type: "BRIDGE_OPEN_FORMS", items: [ref] }, "Opening…"),
         item.package ? `Opens myFuture's form with package ${item.package} selected` : "Opens myFuture's form; choose your documents there");
       if (item.packageStatus !== "done") act(openPrepare === item.postingId ? "Close" : "Package…", "secondary",
-        () => { openPrepare = openPrepare === item.postingId ? "" : item.postingId; render(); },
+        () => { setOpenPrepare(openPrepare === item.postingId ? "" : item.postingId); render(); },
         "Build a package (CV, transcript, cover letter) before applying", true);
       act(item.shortlisted ? "★" : "☆", "secondary icon", (b) => run(b, { type: "BRIDGE_SHORTLIST", postingId: item.postingId, board: ref.board }, "…"),
         item.shortlisted ? "Remove from your myFuture shortlist" : "Add to your myFuture shortlist", true);
@@ -146,10 +148,26 @@
 
   // Per-posting form state, so choices and Claude's sentence survive list refreshes.
   const forms = new Map();
+  let loaded = false;
+  const setOpenPrepare = (id) => { openPrepare = id; chrome.storage.local.set({ mstOpenPrepare: id }); };
+
+  // Claude drafts live in "mstBatch" (shared with letters.html), so closing the popup or reloading a page keeps them.
+  async function saveDraft(id, state, extra = {}) {
+    if (!state.drafted) return;
+    const { mstBatch = {} } = await chrome.storage.local.get({ mstBatch: {} });
+    mstBatch[id] = { ...(mstBatch[id] || {}), text: state.sentence || "", posting: state.drafted, style: state.style || mstBatch[id]?.style,
+      pdf: state.pdf || "", pdfText: state.pdfText || "", cv: state.cv, transcript: state.transcript, status: "drafted", ...extra };
+    drafts = mstBatch;
+    await chrome.storage.local.set({ mstBatch });
+  }
+  const draftState = (b) => (b?.text && b.posting && b.status !== "built"
+    ? { drafted: b.posting, sentence: b.text, style: b.style, pdf: b.pdf || "", pdfText: b.pdfText || "", letter: "__claude",
+      ...(b.cv ? { cv: b.cv } : {}), ...(b.transcript !== undefined ? { transcript: b.transcript } : {}) }
+    : {});
 
   function packageForm(item, ref) {
     if (!docs?.cvs?.length) return el("p", { className: "app-error", textContent: "Press Sync first so the extension knows your CVs, transcripts and cover letters on myFuture." });
-    if (!forms.has(item.postingId)) forms.set(item.postingId, {});
+    if (!forms.has(item.postingId)) forms.set(item.postingId, draftState(drafts[item.postingId]));
     const state = forms.get(item.postingId);
     const newest = (list) => JobTools.newestDocs(list, docs.uploaded);
     const select = (options, extra = []) => el("select", {}, ...extra.map(([v, t]) => el("option", { value: v, textContent: t })), ...options.map((name) => el("option", { value: name, textContent: name })));
@@ -160,7 +178,7 @@
     const why = el("small", { className: "recommend", textContent: state.rec ? "" : "Reading the posting to recommend a CV…" });
     const file = el("input", { type: "file", accept: "application/pdf,.pdf", hidden: true });
     const write = el("button", { type: "button", className: "secondary", textContent: state.drafted ? "Rewrite" : "Write with Claude", hidden: true });
-    const sentence = el("textarea", { hidden: true, rows: 6, value: state.sentence || "", placeholder: "Claude's opening sentence, a blank line, then the fit paragraph appear here; edit them if you like." });
+    const sentence = el("textarea", { hidden: true, rows: state.style === "free" ? 12 : 6, value: state.sentence || "", placeholder: "Claude's opening sentence, a blank line, then the fit paragraph appear here; edit them if you like." });
     const hint = el("small", { hidden: true, textContent: "Claude writes from your facts and your cover letter settings. It may look up the company on the web. Takes ~30 s, then ~1 min to make the PDF." });
     const previewBtn = el("button", { type: "button", className: "link", textContent: "Preview the whole letter", hidden: true });
     const previewBox = el("pre", { className: "letter-preview", hidden: true });
@@ -223,8 +241,9 @@
       });
     }
 
-    for (const control of [cv, transcript, letter]) control.addEventListener("change", () => { remember(); sync(); });
-    sentence.addEventListener("input", remember);
+    for (const control of [cv, transcript, letter]) control.addEventListener("change", () => { remember(); sync(); saveDraft(item.postingId, state); });
+    let saveTimer = 0;
+    sentence.addEventListener("input", () => { remember(); clearTimeout(saveTimer); saveTimer = setTimeout(() => saveDraft(item.postingId, state), 400); });
     // Rewrite with an optional change, make the PDF, look at it; upload only when happy.
     const change = el("input", { type: "text", hidden: true, placeholder: "What to change (optional), e.g. shorter, mention my game projects" });
     const makePdf = el("button", { type: "button", className: "secondary", textContent: "Make PDF", hidden: true });
@@ -242,7 +261,10 @@
         if (!letterText(reply)) { say("Claude's answer came back empty. Reload the extension on chrome://extensions and try again.", true); return; }
         state.drafted = reply.posting;
         state.sentence = sentence.value = letterText(reply);
+        state.style = reply.style;
         state.pdf = "";
+        remember();
+        await saveDraft(item.postingId, state);
         change.value = "";
         sentence.rows = reply.style === "free" ? 12 : 6;
         say(reply.issues?.length ? `Check before using: ${reply.issues.join("; ")}.` : "Read it, edit or rewrite it, then Make PDF to see the final letter.", Boolean(reply.issues?.length));
@@ -260,6 +282,7 @@
         if (!reply?.ok || !result?.ok) { say(`The PDF failed: ${result?.error || reply?.error || "no answer"}`, true); return; }
         state.pdf = result.pdf;
         state.pdfText = sent;
+        await saveDraft(item.postingId, state);
         say("PDF ready. View it; rewrite if needed, or upload it.");
         await send({ type: "BRIDGE_VIEW_PATH", path: state.pdf });
       } finally { makePdf.disabled = false; makePdf.textContent = "Make PDF again"; showPdfButtons(); }
@@ -282,7 +305,7 @@
         for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
         choice.letterFile = { name: picked.name, base64: btoa(binary) };
       }
-      if (await run(create, { type: "BRIDGE_PREPARE_ONE", item: ref, choice }, "Creating…")) { openPrepare = ""; forms.delete(item.postingId); }
+      if (await run(create, { type: "BRIDGE_PREPARE_ONE", item: ref, choice }, "Creating…")) { setOpenPrepare(""); forms.delete(item.postingId); await saveDraft(item.postingId, state, { status: "built" }); }
     });
     sync();
     return el("div", { className: "prepare" },
