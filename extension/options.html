@@ -50,12 +50,21 @@
       <textarea id="banned" rows="3" placeholder="synergy&#10;go-getter"></textarea>
       <small>Common machine-sounding phrases (like "I am excited to" or long dashes) are already avoided.</small>
 
+      <label for="forbid">Company names that must never appear in a new letter (one per line)</label>
+      <textarea id="forbid" rows="3" placeholder="Old employer&#10;Company from an earlier letter"></textarea>
+      <small>A letter that still names one of these is not used (the posting's own company is always allowed).</small>
+
       <h2>Where the facts come from</h2>
       <p class="note">Claude only states facts it finds here. Press <b>Refresh sources</b> after changing them, then read
         the summary below; letters are written from it.</p>
       <label class="inline"><input type="checkbox" id="cvHistory" /> <span>Use my CV history <small id="cvFolder"></small></span></label>
       <label for="paths">Folders or files on this computer (one per line)</label>
       <textarea id="paths" rows="3" placeholder="C:\Users\you\Documents\Jobs\projects"></textarea>
+      <div class="row" style="margin-top:6px">
+        <button id="addFolder" type="button" class="secondary">Add folder…</button>
+        <button id="addFiles" type="button" class="secondary">Add files…</button>
+        <span id="browseStatus" class="status"></span>
+      </div>
       <small>PDF, Markdown and text files. Pick specific folders, not your whole drive.</small>
       <label for="links">Links (one per line)</label>
       <textarea id="links" rows="3" placeholder="https://your-site.github.io&#10;https://github.com/you"></textarea>

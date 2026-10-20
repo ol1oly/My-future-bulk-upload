@@ -13,7 +13,7 @@ cover letters, rebuild one application package per CV, and delete the older date
   opens the letter in a package; **Sync** reads your shortlist and what's already submitted.
 - **With Claude Code** (optional, Windows + Word): install the local bridge (`native\install_host.ps1`) and set up a
   profile of facts + letter templates (`apply/SKILL.md`). Then Find matches lets Claude pick postings and explain why, and
-  **Package… → Write one with Claude** drafts the letter (Claude runs with no tools; you review and preview it) and builds
+  **Package… → Write one with Claude** drafts the letter (Claude can only search and read the web, to look up the company; you review and preview it) and builds
   the PDF from your template. **Write letters for all** does every posting without a package, with a review step before
   anything is uploaded. **Cover letter settings** (link at the bottom of the popup, or ask Claude Code): template or free
   form, your instructions in plain English, sources (CV history, folders, links), and the model.

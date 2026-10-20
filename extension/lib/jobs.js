@@ -243,8 +243,8 @@
           SALUTATION: salutationFor(job.contact, job.organization, language),
           ROLE: clean(job.title),
           COMPANY: clean(job.organization),
-          INTEREST_ABOUT_ROLE: "",
-          QUALITY: ""
+          HOOK: "",
+          FIT: ""
         }
       }
     };
@@ -329,6 +329,17 @@
     if (/remote|distance|teletravail|virtual|virtuel/.test(value)) return "remote";
     if (/in person|on.?site|presentiel|sur place|en personne/.test(value)) return "inperson";
     return "";
+  }
+
+  // Document names newest first: the date at the end of the name (en_fullstack_2026-09-14), else the upload date
+  // myFuture shows (uploaded = { name: date }), else last. Names without either keep their order.
+  function newestDocs(names, uploaded = {}) {
+    const when = (name) => {
+      const dated = String(name).match(/_(\d{4}-\d{2}-\d{2})$/);
+      const time = Date.parse(dated ? dated[1] : uploaded[name] || "");
+      return Number.isNaN(time) ? -Infinity : time;
+    };
+    return [...(names || [])].map((name, i) => ({ name, i, t: when(name) })).sort((a, b) => b.t - a.t || a.i - b.i).map((d) => d.name);
   }
 
   // Best CV document for a suggestion like "en_fullstack": exact base first, then language + track words in the name.
@@ -429,6 +440,6 @@
 
   return {
     BRIDGE_API, letterText, FIELD_ALIASES, fieldForLabel, normalizeLabel, detectLanguage, recommendTrack, parseDocuments, parseMethod, parseDate, daysUntil,
-    parsePosting, isLikelyPosting, jobFileStem, mailtoFor, DEFAULT_PREFS, scorePosting, filterPosting, isSubmitted, provinceName, locationOf, workFormat, pickCv, trackerRow, trackerCsv, TRACKER_COLUMNS, slug
+    parsePosting, isLikelyPosting, jobFileStem, mailtoFor, DEFAULT_PREFS, scorePosting, filterPosting, isSubmitted, provinceName, locationOf, workFormat, newestDocs, pickCv, trackerRow, trackerCsv, TRACKER_COLUMNS, slug
   };
 });

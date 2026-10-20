@@ -64,5 +64,7 @@ def issues(text, language="en", extra=()):
 
 
 def clean_dashes(text):
-    """Replace long dashes with commas, the most common harmless fix."""
-    return re.sub(r"\s*[—–]\s*", ", ", str(text or ""))
+    """Replace long dashes: a dash joining two words or numbers (Reingold–Tilford, Jan–Mar) becomes a hyphen; a dash
+    used as punctuation (with spaces) becomes a comma, the most common harmless fix."""
+    text = re.sub(r"(?<=\w)[—–](?=\w)", "-", str(text or ""))
+    return re.sub(r"\s*[—–]\s*", ", ", text)

@@ -174,3 +174,11 @@ assert.equal(jobs.filterPosting(montreal, {}, { ...P2, format: "hybrid" }), "");
 const toronto = jobs.parsePosting([{ label: "Job Title", value: "Dev" }, { label: "Job Location", value: "Toronto, ON" }]);
 assert.equal(jobs.locationOf(toronto).province, "Ontario");
 console.log("Location filter tests passed.");
+
+// Newest documents: dated names first (newest date), then by upload date, never alphabetical.
+assert.deepEqual(jobs.newestDocs(["fr_normal_only", "en_fullstack_2026-01-05", "UNOFFICIAL Transcript_2026-09-14", "en_fullstack_2026-09-14"]),
+  ["UNOFFICIAL Transcript_2026-09-14", "en_fullstack_2026-09-14", "en_fullstack_2026-01-05", "fr_normal_only"]);
+assert.deepEqual(jobs.newestDocs(["transcript old", "transcript new"], { "transcript old": "Jan 3, 2025", "transcript new": "Sep 14, 2026" }),
+  ["transcript new", "transcript old"]);
+assert.equal(jobs.pickCv(jobs.newestDocs(["en_normal_2026-01-05", "zz_cv", "en_normal_2026-09-14"]), "en_normal").name, "en_normal_2026-09-14");
+console.log("Newest document tests passed.");

@@ -1,6 +1,6 @@
 # Build cover-letter templates (.docx with [SLOT]s) from a JSON file of paragraphs, reusing the look of an existing letter.
 # Usage: powershell -NoProfile -ExecutionPolicy Bypass -File build_templates.ps1 -Json templates.json -Base my_letter.docx -OutDir slots
-# templates.json: { "<lang>_<track>": ["[SALUTATION]", "paragraph with [ROLE] [COMPANY] [INTEREST_ABOUT_ROLE]", ..., "Name", "contact line"] }
+# templates.json: { "<lang>_<track>": ["[SALUTATION]", "[HOOK] paragraph with [ROLE] [COMPANY]", "[FIT]", ..., "Name", "contact line"] }
 param(
   [Parameter(Mandatory)] [string] $Json,
   [Parameter(Mandatory)] [string] $Base,

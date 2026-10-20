@@ -349,7 +349,8 @@ importScripts("lib/jobs.js");
     const [cvDocs, transcriptDocs] = await inPage(tabId, async () => [
       await window.__mfFrame.listDocs("CV/Resume"), await window.__mfFrame.listDocs("Unofficial Transcript")]);
     await chrome.storage.local.set({ mfDocs: { cvs: cvDocs.map((d) => d.name), transcripts: transcriptDocs.map((d) => d.name),
-      coverLetters: letterDocs.map((d) => d.name), packages: packageDocs.map((d) => d.name) } });
+      coverLetters: letterDocs.map((d) => d.name), packages: packageDocs.map((d) => d.name),
+      uploaded: Object.fromEntries([...cvDocs, ...transcriptDocs, ...letterDocs].map((d) => [d.name, d.date || ""])) } });
     let submitted = 0, started = 0, ready = 0;
     await updateApps((s) => {
       for (const app of Object.values(s)) {
@@ -452,13 +453,13 @@ importScripts("lib/jobs.js");
     return { cv: d.cv, language: d.language, track: d.track, matched: d.matched, documents: d.documents };
   }
 
-  // Claude (on this computer, through the bridge, with no tools) writes the one posting-specific sentence.
+  // Claude (on this computer, through the bridge, with only web search/fetch to look up the company) writes the posting-specific parts (opening sentence + fit paragraph, or the whole body in free form).
   async function draftLetter(tabId, item, rewrite = {}) {
     note(tabId, "Reading the posting…");
     const details = await postingDetails(tabId, item);
     const posting = { ...details, postingId: String(item.postingId), title: details.title || item.title, organization: details.organization || item.organization,
       feedback: rewrite.feedback || "", previous: rewrite.previous || "" };
-    note(tabId, "Claude is writing the sentence for this posting…");
+    note(tabId, "Claude is writing this letter…");
     const draft = await host({ cmd: "draftLetter", posting });
     note(tabId, draft.issues?.length ? `Review the letter: ${draft.issues.join("; ")}.` : "Review the letter, then create the package.");
     return { text: draft.text, style: draft.style, issues: draft.issues || [], model: draft.model, cv: details.cv, documents: details.documents,

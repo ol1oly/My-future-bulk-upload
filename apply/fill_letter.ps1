@@ -5,7 +5,7 @@
 # Many letters in ONE Word session (Word starts once, so each extra letter takes seconds instead of ~a minute):
 #   powershell -NoProfile -File fill_letter.ps1 -BatchJson <jobs.json> [-PidFile <word.pid>]
 #   jobs.json: [ { "template": "...docx", "outStem": "dir\\name", "slotsJson": "slots.json", "forbid": "", "maxPages": 1, "id": "..." } ]
-# slots.json: { "SALUTATION": "Dear Jane Smith,", "ROLE": "...", "COMPANY": "...", "INTEREST_ABOUT_ROLE": "..." }
+# slots.json: { "SALUTATION": "Dear Jane Smith,", "ROLE": "...", "COMPANY": "...", "HOOK": "...", "FIT": "..." }
 # Prints one JSON line per letter (UTF-8): { id, ok, docx, pdf, pages, leftovers, forbidden, error }. Never overwrites a template.
 # -PidFile: where to write the id of the Word process this run started, so a caller that times out can end it.
 param(
@@ -33,6 +33,8 @@ function Fill-Letter($word, $template, $outStem, $slotsJson, $forbid, $maxPages,
       # Templates say "[INTEREST_ABOUT_ROLE]." : when the text already ends with a period, replace the slot's period too.
       $tokens = @("[$($slot.Name)]")
       if ($value.EndsWith(".")) { $tokens = @("[$($slot.Name)].") + $tokens }
+      # An empty slot (e.g. no [HOOK]) takes the space after it too, so the sentence doesn't start with a blank.
+      if ($value -eq "") { $tokens = @("[$($slot.Name)] ") + $tokens }
       foreach ($token in $tokens) {
         # Word's Find spans formatting runs; setting Range.Text avoids the 255-char replace limit and keeps run style.
         for ($guard = 0; $guard -lt 20; $guard++) {

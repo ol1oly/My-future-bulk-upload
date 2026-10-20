@@ -1,6 +1,6 @@
-// Build a job card from plain posting text (PDF/email postings the extension can't read).
+// Build a parsed posting (same shape as a scan entry) from plain posting text (PDF/email postings the extension can't read).
 // Usage: node card_from_text.js <posting.txt> <out.json> [--title "..."] [--org "..."] [--url "..."]
-// Uses the same parser as the myFuture Toolkit extension (../extension/lib/jobs.js) so cards look identical.
+// Uses the same parser as the myFuture Toolkit extension (../extension/lib/jobs.js) so the output matches a scan entry.
 const fs = require("node:fs");
 const path = require("node:path");
 const LIB = process.env.JOB_TOOLS_LIB || path.join(__dirname, "..", "extension", "lib", "jobs.js");

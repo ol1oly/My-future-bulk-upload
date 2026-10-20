@@ -151,7 +151,7 @@
     if (!docs?.cvs?.length) return el("p", { className: "app-error", textContent: "Press Sync first so the extension knows your CVs, transcripts and cover letters on myFuture." });
     if (!forms.has(item.postingId)) forms.set(item.postingId, {});
     const state = forms.get(item.postingId);
-    const newest = (list) => [...list].sort().reverse();
+    const newest = (list) => JobTools.newestDocs(list, docs.uploaded);
     const select = (options, extra = []) => el("select", {}, ...extra.map(([v, t]) => el("option", { value: v, textContent: t })), ...options.map((name) => el("option", { value: name, textContent: name })));
     const cv = select(newest(docs.cvs));
     const transcript = select(newest(docs.transcripts), [["", "No transcript"]]);
@@ -160,8 +160,8 @@
     const why = el("small", { className: "recommend", textContent: state.rec ? "" : "Reading the posting to recommend a CV…" });
     const file = el("input", { type: "file", accept: "application/pdf,.pdf", hidden: true });
     const write = el("button", { type: "button", className: "secondary", textContent: state.drafted ? "Rewrite" : "Write with Claude", hidden: true });
-    const sentence = el("textarea", { hidden: true, rows: 4, value: state.sentence || "", placeholder: "Claude's sentence about this posting appears here; edit it if you like." });
-    const hint = el("small", { hidden: true, textContent: "Claude writes from your facts and your cover letter settings. Takes ~10 s, then ~1 min to make the PDF." });
+    const sentence = el("textarea", { hidden: true, rows: 6, value: state.sentence || "", placeholder: "Claude's opening sentence, a blank line, then the fit paragraph appear here; edit them if you like." });
+    const hint = el("small", { hidden: true, textContent: "Claude writes from your facts and your cover letter settings. It may look up the company on the web. Takes ~30 s, then ~1 min to make the PDF." });
     const previewBtn = el("button", { type: "button", className: "link", textContent: "Preview the whole letter", hidden: true });
     const previewBox = el("pre", { className: "letter-preview", hidden: true });
     const filePreview = el("button", { type: "button", className: "link", textContent: "Preview this PDF", hidden: true });
@@ -244,7 +244,7 @@
         state.sentence = sentence.value = letterText(reply);
         state.pdf = "";
         change.value = "";
-        sentence.rows = reply.style === "free" ? 12 : 4;
+        sentence.rows = reply.style === "free" ? 12 : 6;
         say(reply.issues?.length ? `Check before using: ${reply.issues.join("; ")}.` : "Read it, edit or rewrite it, then Make PDF to see the final letter.", Boolean(reply.issues?.length));
       } finally { write.disabled = false; write.textContent = "Rewrite"; sync(); showPdfButtons(); }
     }

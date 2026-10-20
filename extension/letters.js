@@ -16,13 +16,13 @@
   const say = (text, bad = false) => { statusEl.textContent = text; statusEl.className = `status${bad ? " bad" : ""}`; };
   const send = (message) => chrome.runtime.sendMessage({ ...message, tabId: myFutureTab?.id });
   const saveBatch = () => chrome.storage.local.set({ mstBatch: batch });
-  const newest = (list) => [...(list || [])].sort().reverse();
+  const newest = (list) => JobTools.newestDocs(list, docs?.uploaded);
   const entry = (id) => (batch[id] ||= {});
   const itemOf = (p) => ({ postingId: p.postingId, board: p.board || "internshipscoop", title: p.title, organization: p.organization });
 
   // Same sources as My postings: shortlist, suggestions, saved postings and planned applications without a package.
   async function load() {
-    const data = await chrome.storage.local.get({ mstApps: {}, jobTracker: {}, mfBoard: {}, mstHidden: [], mstSuggested: {}, mfDocs: null, mstBatch: {} });
+    const data = await chrome.storage.local.get({ mstApps: {}, jobTracker: {}, mfBoard: {}, mstHidden: [], mstSuggested: {}, mfDocs: null, mstBatch: {}, mfLastScan: [] });
     docs = data.mfDocs;
     batch = data.mstBatch;
     const byId = new Map();
@@ -31,9 +31,28 @@
     for (const s of Object.values(data.mstSuggested)) add(s.postingId, { board: s.board, title: s.title, organization: s.organization, deadlineText: s.deadlineText });
     for (const c of Object.values(data.jobTracker)) if (c.postingId) add(c.postingId, { board: c.board, title: c.title, organization: c.organization });
     for (const a of Object.values(data.mstApps)) add(a.postingId, { board: a.board, title: a.title, organization: a.organization, packageStatus: a.packageStatus, applied: a.applied });
+    // The last scan already knows each posting's recommended CV and required documents.
+    for (const s of data.mfLastScan) if (byId.has(s.postingId)) add(s.postingId, { recommendedCv: s.cv, documents: s.documents });
     postings = [...byId.values()].filter((p) => !data.mstHidden.includes(p.postingId) && p.packageStatus !== "done" && !p.applied
       && !JobTools.isSubmitted(data.mfBoard[p.postingId]?.appStatus));
     render();
+    recommendMissing();
+  }
+
+  const recommendedCv = (p) => batch[p.postingId]?.recommendedCv || p.recommendedCv || "";
+  const documentsOf = (p) => batch[p.postingId]?.documents || p.documents;
+  const defaultTranscript = (p) => (documentsOf(p)?.transcript ? newest(docs?.transcripts)[0] || "" : "");
+
+  // Postings the last scan didn't cover: read each one on myFuture for its recommended CV (a few seconds each).
+  async function recommendMissing() {
+    const missing = postings.filter((p) => !recommendedCv(p));
+    if (!missing.length || !myFutureTab) return;
+    for (const p of missing) {
+      const reply = await send({ type: "BRIDGE_RECOMMEND", item: itemOf(p) });
+      if (reply?.ok && reply.cv) Object.assign(entry(p.postingId), { recommendedCv: reply.cv, documents: batch[p.postingId]?.documents || reply.documents });
+    }
+    await saveBatch();
+    if (!busy) render();
   }
 
   function render() {
@@ -52,15 +71,15 @@
     const include = el("input", { type: "checkbox", checked: b.include !== false });
     include.addEventListener("change", () => { entry(p.postingId).include = include.checked; saveBatch(); render(); });
     const cv = el("select");
-    const pick = JobTools.pickCv(newest(docs?.cvs), b.recommendedCv || "");
     const cvs = newest(docs?.cvs);
+    const pick = JobTools.pickCv(cvs, recommendedCv(p));
     const ordered = pick.name ? [pick.name, ...cvs.filter((n) => n !== pick.name)] : cvs;
-    for (const name of ordered) cv.append(el("option", { value: name, textContent: name + (name === pick.name && b.recommendedCv ? " (recommended)" : ""), selected: name === (b.cv || pick.name) }));
+    for (const name of ordered) cv.append(el("option", { value: name, textContent: name + (name === pick.name && recommendedCv(p) ? " (recommended)" : ""), selected: name === (b.cv || pick.name) }));
     cv.addEventListener("change", () => { entry(p.postingId).cv = cv.value; saveBatch(); });
     const transcript = el("select", {}, el("option", { value: "", textContent: "No transcript" }), ...newest(docs?.transcripts).map((n) => el("option", { value: n, textContent: n })));
-    transcript.value = b.transcript ?? (b.documents?.transcript ? newest(docs?.transcripts)[0] || "" : "");
+    transcript.value = b.transcript ?? defaultTranscript(p);
     transcript.addEventListener("change", () => { entry(p.postingId).transcript = transcript.value; saveBatch(); });
-    const text = el("textarea", { rows: b.style === "free" ? 12 : 4, value: b.text || "", placeholder: "Press Write letters above." });
+    const text = el("textarea", { rows: b.style === "free" ? 12 : 6, value: b.text || "", placeholder: "Press Write letters above. Template letters: the opening sentence, a blank line, then the fit paragraph." });
     text.addEventListener("input", () => { entry(p.postingId).text = text.value; saveBatch(); viewBtn.hidden = !pdfCurrent(batch[p.postingId]); });
     const change = el("input", { type: "text", placeholder: "What to change (optional), e.g. shorter, mention my game projects" });
     const rewrite = el("button", { type: "button", className: "secondary", textContent: b.text ? "Rewrite" : "Write", disabled: !myFutureTab || busy });
@@ -83,7 +102,7 @@
     const state = b.status === "built" ? el("span", { className: "state ok", textContent: `Package ${b.packageName} ready` })
       : b.pdfError && !pdfCurrent(b) ? el("span", { className: "state bad", textContent: `PDF: ${b.pdfError}` })
       : b.status === "error" ? el("span", { className: "state bad", textContent: b.error })
-      : b.documents && !b.documents.coverLetter ? el("span", { className: "state", textContent: "This posting doesn't ask for a cover letter (one is still allowed)." }) : null;
+      : documentsOf(p) && !documentsOf(p).coverLetter ? el("span", { className: "state", textContent: "This posting doesn't ask for a cover letter (one is still allowed)." }) : null;
     return el("div", { className: `card${b.status === "built" ? " done" : ""}` },
       el("div", { className: "head" }, include,
         el("div", {}, el("strong", { textContent: `${p.organization || "Posting"}: ${p.title || p.postingId}` }),
@@ -150,8 +169,8 @@
     try {
       for (const [i, p] of targets.entries()) {
         const b = batch[p.postingId];
-        const cv = b.cv || JobTools.pickCv(newest(docs?.cvs), b.recommendedCv || "").name;
-        const transcript = b.transcript ?? (b.documents?.transcript ? newest(docs?.transcripts)[0] || "" : "");
+        const cv = b.cv || JobTools.pickCv(newest(docs?.cvs), recommendedCv(p)).name;
+        const transcript = b.transcript ?? defaultTranscript(p);
         say(`Uploading ${i + 1} of ${targets.length}: ${p.organization} (${pdfCurrent(b) ? "your PDF" : "making the PDF first"}, then the package)…`);
         const reply = await send({ type: "BRIDGE_PREPARE_ONE", item: itemOf(p),
           choice: { cv, transcript, coverLetter: "", claude: { text: b.text, posting: b.posting, pdf: pdfCurrent(b) ? b.pdf : "" } } });

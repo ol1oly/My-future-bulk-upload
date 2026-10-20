@@ -21,6 +21,7 @@
     $("#instructions").value = s.instructions || "";
     $("#model").replaceChildren(...reply.models.map((m) => Object.assign(document.createElement("option"), { value: m, textContent: MODEL_NAMES[m] || m, selected: m === s.model })));
     $("#banned").value = (s.extraBanned || []).join("\n");
+    $("#forbid").value = (s.forbidCompanies || []).join("\n");
     $("#cvHistory").checked = Boolean(s.useCvHistory);
     $("#cvFolder").textContent = reply.cvFolder ? `(${reply.cvFolder})` : "(no cv folder found under your documents folder)";
     $("#paths").value = (s.paths || []).join("\n");
@@ -52,6 +53,7 @@
         instructions: $("#instructions").value,
         model: $("#model").value,
         extraBanned: lines($("#banned").value),
+        forbidCompanies: lines($("#forbid").value),
         useCvHistory: $("#cvHistory").checked,
         paths: lines($("#paths").value),
         links: lines($("#links").value)
@@ -63,6 +65,24 @@
       status($("#saveStatus"), error.message, true);
     } finally { button.disabled = false; }
   });
+
+  // The picker is a Windows dialog opened by the local bridge (it may appear behind Chrome's window).
+  for (const [id, kind] of [["#addFolder", "folder"], ["#addFiles", "files"]]) {
+    $(id).addEventListener("click", async () => {
+      const button = $(id);
+      button.disabled = true;
+      status($("#browseStatus"), "Pick in the window that opened…");
+      try {
+        const { paths } = await host({ cmd: "browsePaths", kind });
+        const current = lines($("#paths").value);
+        const added = paths.filter((p) => !current.some((c) => c.toLowerCase() === p.toLowerCase()));
+        $("#paths").value = [...current, ...added].join("\n");
+        status($("#browseStatus"), added.length ? `Added ${added.length}. Press Save settings.` : "Nothing added.");
+      } catch (error) {
+        status($("#browseStatus"), error.message, true);
+      } finally { button.disabled = false; }
+    });
+  }
 
   $("#refresh").addEventListener("click", async () => {
     const button = $("#refresh");

@@ -8,7 +8,7 @@ Per internship application on myFuture, roughly:
 | --- | --- | --- |
 | Read the posting, decide fit, pick CV variant (language × track) | 2–5 min, × every posting skimmed | Extension (deterministic) |
 | Find deadline, application method, required documents, addressee | 1–2 min, error-prone | Extension (deterministic) |
-| **Tailor the cover letter**: open old letter, strip previous company, rewrite intro + closing, export PDF | **15–45 min** | Template + script, AI only for 2–3 sentences |
+| **Tailor the cover letter**: open old letter, strip previous company, rewrite intro + closing, export PDF | **15–45 min** | Template + script, AI only for the opening sentence + fit paragraph |
 | Upload letter, build application package (CV + transcript + letter) | 3–5 min | Existing in-page scripts |
 | Click Apply, choose package, submit | 1 min | **Always the student** |
 | Track what was sent where, deadlines | ongoing | Extension tracker / CSV |
@@ -21,7 +21,7 @@ remaining judgment is about two sentences per posting.
 ## AI or not
 
 - **No AI** (this extension): field parsing by label text, language detection, CV-track keyword scoring, document
-  checklist, deadline, salutation, tracker, job-card JSON. These are deterministic, testable (`tests/jobs.test.js`),
+  checklist, deadline, salutation, tracker, scan file. These are deterministic, testable (`tests/jobs.test.js`),
   private (no network), and need no API keys in the extension.
 - **AI** (optional, outside the extension, e.g. a Claude Code skill): reads a posting (from a scan or the shortlist), writes the 2–3 slot
   sentences from a fixed list of the student's true facts, fills the Word template, exports a 1-page PDF, and
@@ -30,13 +30,14 @@ remaining judgment is about two sentences per posting.
 - **Never automated**: clicking Apply / Submit / Send. A wrong package sent to an employer cannot be undone, and
   myFuture packages used in an application cannot be deleted.
 
-## Job card (`Downloads/job-cards/*.json`)
+## Parsed posting (entries of `~/.mst/out/scan-<board>.json`)
 
-`{ schema, savedAt, id, url, fields{title, organization, location, workArrangement, salary, term, startDate,
+Written by the popup's **Scan**; `apply/rank_scan.js` re-ranks it offline. Each entry:
+`{ id, postingId, url, row{appStatus, shortlisted, deadlineText, …}, fit{score, hits, excluded}, fields{title, organization, location, workArrangement, salary, term, startDate,
 description, qualifications, deadline, applicationMethod, documentsRequired, contact, contactEmail, website, …},
 extra[{label,value}], language, bilingual, deadline (ISO), documents{cv,coverLetter,transcript,other},
 apply{method: myfuture|website|email|unknown, emails[], urls[]}, track{track, scores, matched[]}, cv,
-coverLetter{needed, template, slots{SALUTATION, ROLE, COMPANY, INTEREST_ABOUT_ROLE, QUALITY}}, applicant }`
+coverLetter{needed, template, slots{SALUTATION, ROLE, COMPANY, HOOK, FIT}} }`
 
 ## Orbis markup notes
 
