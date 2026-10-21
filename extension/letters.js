@@ -3,7 +3,7 @@
 (() => {
   "use strict";
   const $ = (sel) => document.querySelector(sel);
-  const listEl = $("#list"), statusEl = $("#status"), writeBtn = $("#write"), makeBtn = $("#make"), buildBtn = $("#build");
+  const listEl = $("#list"), statusEl = $("#status"), writeBtn = $("#write"), writeAllBtn = $("#writeAll"), makeBtn = $("#make"), buildBtn = $("#build");
   const { letterText } = JobTools;
   const pdfCurrent = (b) => Boolean(b?.pdf && b.pdfText === b.text);
   let myFutureTab = null, docs = null, postings = [], batch = {}, busy = false;
@@ -144,13 +144,16 @@
 
   function lock(on) {
     busy = on;
-    writeBtn.disabled = makeBtn.disabled = buildBtn.disabled = on || !myFutureTab;
+    writeBtn.disabled = writeAllBtn.disabled = makeBtn.disabled = buildBtn.disabled = on || !myFutureTab;
     render();
   }
 
-  async function writeAll() {
-    const targets = postings.filter((p) => (batch[p.postingId]?.include !== false) && !batch[p.postingId]?.text);
-    if (!targets.length) { say("Every selected posting already has a draft. Edit them, or clear a text box to rewrite it."); return; }
+  // all: also redraft postings that already have text (asks first, since it replaces edits).
+  async function writeAll(all = false) {
+    const targets = postings.filter((p) => batch[p.postingId]?.include !== false && batch[p.postingId]?.status !== "built" && (all || !batch[p.postingId]?.text));
+    if (!targets.length) { say(all ? "No selected posting left to write." : "Every selected posting already has a draft. Edit them, or press Rewrite all."); return; }
+    const drafted = targets.filter((p) => batch[p.postingId]?.text).length;
+    if (drafted && !confirm(`Rewrite all ${targets.length} letter(s)? This replaces ${drafted} existing draft(s), including your edits.`)) return;
     lock(true);
     try {
       for (const [i, p] of targets.entries()) {
@@ -188,7 +191,8 @@
     [myFutureTab] = await chrome.tabs.query({ url: "https://myfuture.mcgill.ca/*" });
     if (!myFutureTab) say("Open myFuture in another tab (signed in) and reload this page.", true);
     lock(false);
-    writeBtn.addEventListener("click", writeAll);
+    writeBtn.addEventListener("click", () => writeAll());
+    writeAllBtn.addEventListener("click", () => writeAll(true));
     makeBtn.addEventListener("click", makeAll);
     buildBtn.addEventListener("click", buildAll);
     const status = await chrome.runtime.sendMessage({ type: "BRIDGE_STATUS" });
