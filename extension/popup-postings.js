@@ -9,8 +9,8 @@
   const progressEl = $("#postingsProgress"), filtersEl = $("#postingsFilters"), noteEl = $("#postingsNote");
   const applyAllBtn = $("#applyAll"), syncBtn = $("#syncButton"), findBtn = $("#findMatches"), writeAllBtn = $("#writeAll");
   const claudePanel = $("#claudePanel"), claudeStatus = $("#claudeStatus"), claudeRun = $("#claudeRun");
-  const FILTERS = [["active", "Active"], ["suggested", "Suggested"], ["prepare", "No package yet"], ["ready", "Package ready"], ["submitted", "Submitted"], ["shortlist", "★ Shortlist"]];
-  const STAGE_LABEL = { submitted: "Submitted", started: "Started", ready: "Package ready", prepare: "No package yet" };
+  const FILTERS = [["active", "Active"], ["suggested", "Suggested"], ["prepare", "No package yet"], ["ready", "Package ready"], ["external", "External"], ["submitted", "Submitted"], ["shortlist", "★ Shortlist"]];
+  const STAGE_LABEL = { submitted: "Submitted", started: "Started", ready: "Package ready", prepare: "No package yet", external: "External" };
   let tab = null, onMyFuture = false, bridge = null;
   let filter = "active", items = [], docs = null, counts = {}, openPrepare = "", armedUntil = 0, hiddenCount = 0, letterFiles = {}, drafts = {};
 
@@ -29,7 +29,7 @@
   }
 
   async function load() {
-    const data = await chrome.storage.local.get({ mstApps: {}, jobTracker: {}, mfBoard: {}, mstHidden: [], mfDocs: null, mfSyncedAt: "", mfCounts: {}, mstSuggested: {}, mstLetterFiles: {}, mstBatch: {}, mstOpenPrepare: "" });
+    const data = await chrome.storage.local.get({ mstApps: {}, jobTracker: {}, mfBoard: {}, mstHidden: [], mfDocs: null, mfSyncedAt: "", mfCounts: {}, mstSuggested: {}, mstLetterFiles: {}, mstBatch: {}, mstOpenPrepare: "", mstApply: {} });
     letterFiles = data.mstLetterFiles;
     drafts = data.mstBatch;
     if (!loaded) { openPrepare = data.mstOpenPrepare; loaded = true; }
@@ -61,10 +61,13 @@
     for (const item of byId.values()) {
       const row = data.mfBoard[item.postingId];
       if (row) { item.shortlisted = row.shortlisted; item.appStatus = row.appStatus || ""; }
+      const apply = data.mstApply[item.postingId];
+      item.method = apply?.method || "";
+      item.external = JobTools.isExternal(item.method);
       const done = JobTools.isSubmitted(item.appStatus) || item.applied;
-      item.stage = done ? "submitted" : item.appStatus ? "started" : item.packageStatus === "done" ? "ready" : "prepare";
+      item.stage = done ? "submitted" : item.external ? "external" : item.appStatus ? "started" : item.packageStatus === "done" ? "ready" : "prepare";
     }
-    const order = ["ready", "started", "prepare", "submitted"];
+    const order = ["ready", "started", "external", "prepare", "submitted"];
     items = [...byId.values()].filter((i) => !data.mstHidden.includes(i.postingId))
       .sort((a, b) => order.indexOf(a.stage) - order.indexOf(b.stage) || (a.organization || "").localeCompare(b.organization || ""));
     syncedEl.textContent = data.mfSyncedAt ? `synced ${new Date(data.mfSyncedAt).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}` : "not synced yet";
@@ -115,12 +118,23 @@
       b.addEventListener("click", () => onClick(b));
       actions.append(b);
     };
-    if (item.stage !== "submitted") {
+    if (item.external && item.stage !== "submitted") {
+      // Applied for outside myFuture: no package; Apply opens the employer's page (or the posting, which names it).
+      act(item.method === "email" ? "Apply by email" : "Apply on their site ↗", "primary", (b) => run(b, { type: "BRIDGE_OPEN_FORMS", items: [ref] }, "Opening…"),
+        item.method === "email" ? "Opens the posting with the address to email; no myFuture package needed" : "Opens the employer's application page; no myFuture package needed");
+      act(openPrepare === item.postingId ? "Close" : "Letter…", "secondary",
+        () => { setOpenPrepare(openPrepare === item.postingId ? "" : item.postingId); render(); },
+        "Make a cover letter PDF to upload on their site", true);
+      act("Mark applied", "secondary", (b) => run(b, { type: "BRIDGE_MARK_APPLIED", postingId: item.postingId, item: ref }, "…"),
+        "myFuture can't see applications sent outside it; mark this one as done");
+    } else if (item.stage !== "submitted") {
       act(item.stage === "started" ? "Continue" : "Apply", "primary", (b) => run(b, { type: "BRIDGE_OPEN_FORMS", items: [ref] }, "Opening…"),
         item.package ? `Opens myFuture's form with package ${item.package} selected` : "Opens myFuture's form; choose your documents there");
       if (item.packageStatus !== "done") act(openPrepare === item.postingId ? "Close" : "Package…", "secondary",
         () => { setOpenPrepare(openPrepare === item.postingId ? "" : item.postingId); render(); },
         "Build a package (CV, transcript, cover letter) before applying", true);
+    }
+    if (item.stage !== "submitted") {
       act(item.shortlisted ? "★" : "☆", "secondary icon", (b) => run(b, { type: "BRIDGE_SHORTLIST", postingId: item.postingId, board: ref.board }, "…"),
         item.shortlisted ? "Remove from your myFuture shortlist" : "Add to your myFuture shortlist", true);
     }
@@ -130,7 +144,7 @@
     if (!item.shortlisted) act("Hide", "link", (b) => run(b, { type: "BRIDGE_FORGET", postingId: item.postingId }, "Hiding…"), "Hide from this list (doesn't change myFuture)");
 
     const chips = el("div", { className: "steps" },
-      chip(STAGE_LABEL[item.stage], { submitted: "ok", ready: "ok", started: "warn" }[item.stage] || ""),
+      chip(STAGE_LABEL[item.stage], { submitted: "ok", ready: "ok", started: "warn", external: "ext" }[item.stage] || ""),
       item.shortlisted ? chip("★ Shortlisted") : null,
       item.letterName ? chip(`Letter ${item.letter === "done" ? "✓" : "○"}`, item.letter === "done" ? "ok" : "") : null,
       item.suggested ? chip(item.suggestedBy === "claude" ? "Suggested by Claude" : "Suggested") : null,
@@ -238,6 +252,7 @@
         if (!reply?.ok) { why.textContent = "Couldn't read the posting; pick the CV yourself."; return; }
         state.rec = reply;
         applyRecommendation(reply);
+        listFiles(); // defined below; runs after the form is built
       });
     }
 
@@ -288,7 +303,16 @@
       } finally { makePdf.disabled = false; makePdf.textContent = "Make PDF again"; showPdfButtons(); }
     });
     viewPdf.addEventListener("click", () => send({ type: "BRIDGE_VIEW_PATH", path: state.pdf }));
-    const create = el("button", { type: "button", className: "primary", textContent: "Upload & create package" });
+    const create = el("button", { type: "button", className: "primary", textContent: "Upload & create package", hidden: item.external });
+    // External postings: nothing goes to myFuture; list what to upload on the employer's site instead.
+    const external = item.external ? el("small", { className: "recommend" }) : null;
+    const listFiles = () => {
+      if (!external) return;
+      const letterPart = letter.value === "__claude" ? "Claude's letter (Make PDF, then View PDF to save it)"
+        : letter.value === "__upload" ? "the PDF you picked" : letter.value ? `cover letter ${letter.value}` : "";
+      external.textContent = `No myFuture package for this one. On their site, upload: CV ${cv.value}${transcript.value ? `, transcript ${transcript.value}` : ""}${letterPart ? `, ${letterPart}` : ""} (the PDFs in your documents folder).`;
+    };
+    for (const control of [cv, transcript, letter]) control.addEventListener("change", listFiles);
     create.addEventListener("click", async () => {
       remember();
       const choice = { cv: cv.value, transcript: transcript.value, coverLetter: ["__upload", "__claude"].includes(letter.value) ? "" : letter.value };
@@ -308,12 +332,13 @@
       if (await run(create, { type: "BRIDGE_PREPARE_ONE", item: ref, choice }, "Creating…")) { setOpenPrepare(""); forms.delete(item.postingId); await saveDraft(item.postingId, state, { status: "built" }); }
     });
     sync();
+    listFiles();
     return el("div", { className: "prepare" },
       why,
       el("label", { textContent: "CV" }), cv,
       el("label", { textContent: "Transcript" }), transcript,
       el("label", { textContent: "Cover letter" }), letter, file, filePreview, hint, sentence, change, write, previewBtn, previewBox, makePdf, viewPdf,
-      create);
+      external, create);
   }
 
   async function run(button, message, busy) {

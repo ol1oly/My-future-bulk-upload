@@ -149,13 +149,26 @@
     const words = (value) => clean(value).toLowerCase().replace(/https?:\/\/\S+/g, " ").replace(/\S+@\S+/g, " ");
     const text = words([job.applicationMethod, job.applicationInstructions].join(" "));
     let method = "unknown";
-    if (/external website|employer(?:'s)? website|company website|site (?:web|internet) (?:externe|de l'employeur)|website/.test(text)) method = "website";
+    // Orbis's own "Application Method" value wins: "Access through McGill University" even when the text also says "see our website".
+    if (/through mcgill|mcgill university|universit[ée] mcgill|g[ée]r[ée]es par|myfuture|orbis/.test(words(job.applicationMethod))) method = "myfuture";
+    else if (/external website|employer(?:'s)? website|company website|site (?:web|internet) (?:externe|de l'employeur)|website/.test(text)) method = "website";
     else if (/through mcgill|mcgill university|universit[ée] mcgill|g[ée]r[ée]es par|myfuture|orbis|through this (?:site|system|portal)|via (?:the )?portal|apply (?:online )?through/.test(text)) method = "myfuture";
     else if (/e-?mail|courriel/.test(text) && emails.length) method = "email";
     const loose = words(all);
     if (method === "unknown" && emails.length && /send|forward|envoy|soumet/.test(loose)) method = "email";
     if (method === "unknown" && urls.length && /apply|postuler/.test(loose)) method = "website";
     return { method, emails, urls };
+  }
+
+  // Applied outside myFuture (employer's site or email): no myFuture package or application form.
+  const isExternal = (method) => method === "website" || method === "email";
+
+  // The best page to apply on from a posting's URLs: an applicant-tracking system first, then a careers/jobs path,
+  // then the first other link; job boards, social media and McGill's own pages are skipped.
+  const ATS = /lever\.co|greenhouse\.io|myworkdayjobs|workday|cezannehr|smartrecruiters|bamboohr|jobvite|icims|taleo|successfactors|workable|ashbyhq|recruitee|teamtailor|applytojob|dayforce/i;
+  function pickApplyUrl(urls = []) {
+    const usable = urls.filter((url) => !/linkedin|glassdoor|indeed|facebook|instagram|twitter|x\.com|youtube|tiktok|mcgill\.ca/i.test(url));
+    return usable.find((url) => ATS.test(url)) || usable.find((url) => /career|carri[eè]re|jobs?\b|emploi|apply|postuler|recrut/i.test(url)) || usable[0] || "";
   }
 
   function pad(number) { return String(number).padStart(2, "0"); }
@@ -434,12 +447,12 @@
 
   // Bump when messages between the extension pages and bridge.js change. Unpacked extensions reload pages on every open
   // but keep the service worker running old code until the extension is reloaded; pages compare this number.
-  const BRIDGE_API = 5;
+  const BRIDGE_API = 6;
   // Letter text from a bridge reply (older hosts answered with "sentence").
   const letterText = (reply) => reply?.text ?? reply?.sentence ?? "";
 
   return {
-    BRIDGE_API, letterText, FIELD_ALIASES, fieldForLabel, normalizeLabel, detectLanguage, recommendTrack, parseDocuments, parseMethod, parseDate, daysUntil,
+    BRIDGE_API, letterText, FIELD_ALIASES, fieldForLabel, normalizeLabel, detectLanguage, recommendTrack, parseDocuments, parseMethod, isExternal, pickApplyUrl, parseDate, daysUntil,
     parsePosting, isLikelyPosting, jobFileStem, mailtoFor, DEFAULT_PREFS, scorePosting, filterPosting, isSubmitted, provinceName, locationOf, workFormat, newestDocs, pickCv, trackerRow, trackerCsv, TRACKER_COLUMNS, slug
   };
 });

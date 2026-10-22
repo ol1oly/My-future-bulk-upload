@@ -20,6 +20,14 @@ importScripts("lib/jobs.js");
   const BOARD_KEY = "mfBoard";   // postingId -> { title, organization, board, shortlisted, appStatus, deadlineText, city }
   const HIDDEN_KEY = "mstHidden"; // posting ids the student removed from "My postings"
   const REQUESTS_KEY = "mstRequests"; // postings the student asked Claude to prepare
+  const APPLY_KEY = "mstApply"; // postingId -> { method, urls, emails }: how to apply (myFuture, employer's website, email)
+
+  async function loadApply() { return (await chrome.storage.local.get({ [APPLY_KEY]: {} }))[APPLY_KEY]; }
+  async function saveApply(entries) {
+    if (!Object.keys(entries).length) return;
+    await chrome.storage.local.set({ [APPLY_KEY]: { ...(await loadApply()), ...entries } });
+  }
+  const applyOf = (p) => ({ method: p.apply.method, urls: p.apply.urls, emails: p.apply.emails });
 
   async function loadApps() { return (await chrome.storage.local.get({ [APPS_KEY]: {} }))[APPS_KEY]; }
   async function updateApps(mutate) {
@@ -118,6 +126,7 @@ importScripts("lib/jobs.js");
       matched: p.fit.hits, why: p.why, appStatus: p.row.appStatus || "", cv: p.cv, documents: p.documents,
       summary: String(p.fields.description || "").replace(/\s+/g, " ").slice(0, 600) }));
     await chrome.storage.local.set({ mfLastScan: compact });
+    await saveApply(Object.fromEntries(result.postings.map((p) => [String(p.postingId), applyOf(p)])));
     const matching = result.postings.filter((p) => !p.why).sort((a, b) => b.fit.score - a.fit.score);
     note(tabId, `Read ${result.postings.length} postings.`);
     return {
@@ -292,14 +301,30 @@ importScripts("lib/jobs.js");
     return { path: saved.path, formTabId: formTab.id };
   }
 
+  // A posting applied for outside myFuture: open the employer's application page (or, with no link, the posting
+  // itself, which names the site or address). No package, no myFuture form, no banner.
+  async function openExternal(app, apply, { active = true } = {}) {
+    const url = apply.method === "website" ? JobTools.pickApplyUrl(apply.urls) : "";
+    if (url) await chrome.tabs.create({ url, active });
+    else await openPostingTab(app);
+    const where = apply.method === "email" ? `by email${apply.emails?.[0] ? ` to ${apply.emails[0]}` : ""}` : "on the employer's website";
+    return `${app.organization || "This posting"}: apply ${where}${url ? " (opened)" : " (see the posting)"}; no myFuture package is needed. Press Mark applied when done.`;
+  }
+
   // Batch: one application form per ready posting, each in its own tab, one after another.
   async function openForms(tabId, postingIds, items) {
     const store = await loadApps();
     const targets = items?.length ? items
       : (postingIds?.length ? postingIds : Object.keys(store)).map(String).map((id) => store[id]).filter((app) => app && !app.applied && app.packageStatus === "done");
     if (!targets.length) throw new Error("No prepared application is waiting (run Prepare first).");
-    const opened = [], failed = [];
+    const applyInfo = await loadApply();
+    const opened = [], failed = [], external = [];
     for (const [index, app] of targets.entries()) {
+      const apply = applyInfo[String(app.postingId)];
+      if (JobTools.isExternal(apply?.method)) {
+        try { external.push(await openExternal(app, apply, { active: index === 0 })); } catch (error) { failed.push({ postingId: app.postingId, error: error.message || String(error) }); }
+        continue;
+      }
       note(tabId, `Opening application form ${index + 1}/${targets.length}: ${app.organization}: ${app.title}`);
       try {
         const tab = await openFormTab(app, { active: index === 0 });
@@ -310,8 +335,9 @@ importScripts("lib/jobs.js");
         await updateApps((s) => { if (s[app.postingId]) s[app.postingId].error = error.message || String(error); });
       }
     }
-    const message = failed.length && !opened.length ? `Could not open the form: ${failed[0].error}`
-      : `Opened ${opened.length} application form(s)${failed.length ? `, ${failed.length} failed` : ""}. In each tab, choose your documents (or the named package) and submit; then press Sync.`;
+    const message = failed.length && !opened.length && !external.length ? `Could not open the form: ${failed[0].error}`
+      : [opened.length ? `Opened ${opened.length} application form(s)${failed.length ? `, ${failed.length} failed` : ""}. In each tab, choose your documents (or the named package) and submit; then press Sync.` : "",
+        ...external].filter(Boolean).join(" ");
     note(tabId, message);
     return { message, opened, failed };
   }
@@ -334,10 +360,25 @@ importScripts("lib/jobs.js");
     await ensureFrameOps(tabId);
     const engine = [await ownFile("lib/jobs.js"), await ownFile("orbis-board.js")];
     const snapshot = {}, counts = {};
+    const known = await loadApply(), apps = await loadApps(), { mstSuggested = {} } = await chrome.storage.local.get({ mstSuggested: {} });
     for (const board of Object.keys(BOARDS)) {
       note(tabId, `Reading ${board === "career" ? "General Jobs" : "Internship / Co-op"} postings…`);
       counts[board] = await inPage(tabId, (path) => window.__mfFrame.boardCounts(path), [BOARDS[board]]);
-      for (const row of await loadBoardIntoFrame(tabId, board, engine)) snapshot[row.id] = { ...row, board };
+      const rows = await loadBoardIntoFrame(tabId, board, engine);
+      for (const row of rows) snapshot[row.id] = { ...row, board };
+      // How to apply (myFuture / website / email), read once per posting shown in My postings.
+      const missing = rows.filter((r) => (r.shortlisted || apps[r.id] || mstSuggested[r.id]) && !known[r.id]).map((r) => r.id);
+      if (missing.length) {
+        note(tabId, `Checking how to apply for ${missing.length} posting(s)…`);
+        await saveApply(await inPage(tabId, async (ids) => {
+          const w = window.__mfFrame.frameWindow();
+          const { details } = await w.__orbisBoard.fetchDetails(ids);
+          return Object.fromEntries(ids.filter((id) => details[id]).map((id) => {
+            const a = w.JobTools.parsePosting(details[id]).apply;
+            return [id, { method: a.method, urls: [...a.urls], emails: [...a.emails] }];
+          }));
+        }, [missing]));
+      }
     }
     // The myFuture shortlist is the source of truth: anything on it is shown again even if it was hidden earlier.
     const { [HIDDEN_KEY]: hiddenBefore = [] } = await chrome.storage.local.get({ [HIDDEN_KEY]: [] });
@@ -357,7 +398,7 @@ importScripts("lib/jobs.js");
         const row = snapshot[app.postingId];
         app.listed = Boolean(row);
         app.appStatus = row?.appStatus || "";
-        app.applied = SUBMITTED.test(app.appStatus);
+        app.applied = Boolean(app.appliedExternally) || SUBMITTED.test(app.appStatus);
         app.started = Boolean(app.appStatus) && !app.applied;
         if (app.letterName && letterDocs.some((d) => d.name === app.letterName)) app.letter = "done";
         if (app.package && packageDocs.some((d) => d.name === app.package)) { app.packageStatus = "done"; delete app.error; }
@@ -443,14 +484,25 @@ importScripts("lib/jobs.js");
       const p = w.JobTools.parsePosting(await w.__orbisBoard.fetchDetail(String(id)));
       return JSON.parse(JSON.stringify({ title: p.fields.title || "", organization: p.fields.organization || "", description: p.fields.description || "",
         qualifications: p.fields.qualifications || "", template: p.coverLetter.template, salutation: p.coverLetter.slots.SALUTATION, cv: p.cv,
-        language: p.language, track: p.track.track, matched: p.track.matched, documents: p.documents }));
+        language: p.language, track: p.track.track, matched: p.track.matched, documents: p.documents,
+        apply: { method: p.apply.method, urls: p.apply.urls, emails: p.apply.emails } }));
     }, [BOARDS[item.board || "internshipscoop"], engine, item.postingId]);
   }
 
-  // What this posting calls for: suggested CV (language × track, with the keywords that decided it) and documents.
+  // What this posting calls for: suggested CV (language × track, with the keywords that decided it), documents, and how to apply.
   async function recommend(tabId, item) {
     const d = await postingDetails(tabId, item);
-    return { cv: d.cv, language: d.language, track: d.track, matched: d.matched, documents: d.documents };
+    await saveApply({ [String(item.postingId)]: d.apply });
+    return { cv: d.cv, language: d.language, track: d.track, matched: d.matched, documents: d.documents, apply: d.apply };
+  }
+
+  // Applied on the employer's site or by email: remembered here, since myFuture never shows those as submitted.
+  async function markApplied(postingId, item = {}, applied = true) {
+    await updateApps((s) => {
+      s[postingId] = { ...(s[postingId] || { postingId, title: item.title || "", organization: item.organization || "", board: item.board || "internshipscoop" }),
+        applied, appliedExternally: applied, appliedAt: applied ? new Date().toISOString() : "" };
+    });
+    return { message: applied ? "Marked as applied." : "Marked as not applied." };
   }
 
   // Claude (on this computer, through the bridge, with only web search/fetch to look up the company) writes the posting-specific parts (opening sentence + fit paragraph, or the whole body in free form).
@@ -553,6 +605,8 @@ importScripts("lib/jobs.js");
   // Prepare one application from the popup, no Claude needed: optional cover letter (existing name or a PDF the
   // student picked), then one package "<cv base>_<Org>_<date>". Records it under My postings as ready to apply.
   async function prepareOne(tabId, item, choice) {
+    const apply = (await loadApply())[String(item.postingId)];
+    if (JobTools.isExternal(apply?.method)) throw new Error("This posting is applied for outside myFuture, so no package is made. Press Apply to open the employer's page.");
     await ensureFrameOps(tabId);
     const day = new Date().toISOString().slice(0, 10);
     const org = String(item.organization || "Job").replace(/[^A-Za-z0-9]+/g, "").slice(0, 24) || "Job";
@@ -671,7 +725,8 @@ importScripts("lib/jobs.js");
       BRIDGE_FIND_MATCHES: () => findMatches(message.tabId, message.board),
       BRIDGE_PREVIEW_LETTER: () => host({ cmd: "previewLetter", posting: message.posting, text: message.text }),
       BRIDGE_VIEW_LETTER: () => viewLetter(String(message.postingId)),
-      BRIDGE_VIEW_FILE: () => viewFile(message.file)
+      BRIDGE_VIEW_FILE: () => viewFile(message.file),
+      BRIDGE_MARK_APPLIED: () => markApplied(String(message.postingId), message.item, message.applied !== false)
     };
     const job = jobs[message?.type];
     if (!job) return undefined;

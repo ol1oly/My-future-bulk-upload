@@ -256,6 +256,7 @@ button.small { width: auto; margin: 0; padding: 4px 9px; font-size: 11px; }
 .row-actions button.link { padding: 4px 4px; }
 .app-row { display: block; }
 .step.warn { border-color: #f0d58a; background: #fff4d6; color: #7a5600; }
+.step.ext { border-color: #9fc3e8; background: #e9f2fb; color: #1b4f86; }
 .apps-empty { margin: 10px 0 0; font-size: 12px; }
 .prepare { display: grid; gap: 4px; margin-top: 8px; padding: 8px; background: var(--surface); border-radius: 8px; }
 .prepare label { font-size: 11px; font-weight: 650; margin-top: 2px; }

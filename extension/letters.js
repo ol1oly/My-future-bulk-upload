@@ -22,7 +22,7 @@
 
   // Same sources as My postings: shortlist, suggestions, saved postings and planned applications without a package.
   async function load() {
-    const data = await chrome.storage.local.get({ mstApps: {}, jobTracker: {}, mfBoard: {}, mstHidden: [], mstSuggested: {}, mfDocs: null, mstBatch: {}, mfLastScan: [] });
+    const data = await chrome.storage.local.get({ mstApps: {}, jobTracker: {}, mfBoard: {}, mstHidden: [], mstSuggested: {}, mfDocs: null, mstBatch: {}, mfLastScan: [], mstApply: {} });
     docs = data.mfDocs;
     batch = data.mstBatch;
     const byId = new Map();
@@ -35,6 +35,8 @@
     for (const s of data.mfLastScan) if (byId.has(s.postingId)) add(s.postingId, { recommendedCv: s.cv, documents: s.documents });
     postings = [...byId.values()].filter((p) => !data.mstHidden.includes(p.postingId) && p.packageStatus !== "done" && !p.applied
       && !JobTools.isSubmitted(data.mfBoard[p.postingId]?.appStatus));
+    // Applied for on the employer's site or by email: letter and PDF only, never a myFuture package.
+    for (const p of postings) p.external = JobTools.isExternal(data.mstApply[p.postingId]?.method);
     render();
     recommendMissing();
   }
@@ -63,7 +65,7 @@
     listEl.replaceChildren(...postings.map(card));
     const active = postings.filter((p) => batch[p.postingId]?.text && batch[p.postingId].status !== "built" && batch[p.postingId].include !== false);
     makeBtn.textContent = `2. Make PDFs (${active.filter((p) => !pdfCurrent(batch[p.postingId])).length})`;
-    buildBtn.textContent = `3. Upload & build packages (${active.length})`;
+    buildBtn.textContent = `3. Upload & build packages (${active.filter((p) => !p.external).length})`;
   }
 
   function card(p) {
@@ -102,6 +104,7 @@
     const state = b.status === "built" ? el("span", { className: "state ok", textContent: b.packageName ? `Package ${b.packageName} ready` : "Package ready" })
       : b.pdfError && !pdfCurrent(b) ? el("span", { className: "state bad", textContent: `PDF: ${b.pdfError}` })
       : b.status === "error" ? el("span", { className: "state bad", textContent: b.error })
+      : p.external ? el("span", { className: "state", textContent: "Applied for on the employer's site: no myFuture package. Make the PDF, then upload it there (Apply in My postings opens their page)." })
       : documentsOf(p) && !documentsOf(p).coverLetter ? el("span", { className: "state", textContent: "This posting doesn't ask for a cover letter (one is still allowed)." }) : null;
     return el("div", { className: `card${b.status === "built" ? " done" : ""}` },
       el("div", { className: "head" }, include,
@@ -166,8 +169,8 @@
   }
 
   async function buildAll() {
-    const targets = postings.filter((p) => batch[p.postingId]?.text && batch[p.postingId].include !== false && batch[p.postingId].status !== "built");
-    if (!targets.length) { say("Nothing to build: write letters first."); return; }
+    const targets = postings.filter((p) => !p.external && batch[p.postingId]?.text && batch[p.postingId].include !== false && batch[p.postingId].status !== "built");
+    if (!targets.length) { say(postings.some((p) => p.external) ? "Nothing to build: external postings get a PDF only (Make PDFs), no package." : "Nothing to build: write letters first."); return; }
     lock(true);
     try {
       for (const [i, p] of targets.entries()) {

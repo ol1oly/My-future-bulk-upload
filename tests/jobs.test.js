@@ -148,6 +148,12 @@ assert.equal(jobs.fieldForLabel("M�thode pour postuler�:"), "applicationMeth
 assert.equal(jobs.fieldForLabel("Methode pour postuler"), "applicationMethod");
 assert.equal(jobs.parseMethod({ applicationMethod: "Candidatures gérées par le McGill University" }).method, "myfuture");
 assert.equal(jobs.parseMethod({ applicationMethod: "Access through an external website https://x.example/apply-by-email" }).method, "website");
+assert.equal(jobs.parseMethod({ applicationMethod: "Access through McGill University", applicationInstructions: "See our website for details" }).method, "myfuture");
+assert.equal(jobs.isExternal("website"), true);
+assert.equal(jobs.isExternal("myfuture"), false);
+assert.equal(jobs.pickApplyUrl(["http://www.grassvalley.com/", "https://recruitment.cezannehr.com/job/application/x"]), "https://recruitment.cezannehr.com/job/application/x");
+assert.equal(jobs.pickApplyUrl(["https://www.linkedin.com/company/x", "https://x.example/", "https://x.example/careers"]), "https://x.example/careers");
+assert.equal(jobs.pickApplyUrl(["https://www.mcgill.ca/caps"]), "");
 console.log("Broken-label tests passed.");
 
 // Location and work format filters (myFuture-style province checkboxes + city).

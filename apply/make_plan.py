@@ -11,6 +11,7 @@ picks.json: [{"postingId": "23133", "board": "internshipscoop", "organization": 
   label       optional short tag for the package name when you apply to several postings at one company
   transcript  true -> attach your transcript base
   letterPdf   optional cover letter PDF to upload (type 13) and put in this application's package
+  method      optional "myfuture" | "website" | "email"; website/email postings are applied for outside myFuture, so skipped
 
 Usage:  python make_plan.py picks.json [--probe <postingId>] [--config path] [--out path]
 Then open myFuture, click the extension → Check plan → Run plan.
@@ -48,6 +49,9 @@ def main():
 
     apps, used = [], set()
     for pick in picks:
+        if pick.get("method") in ("website", "email"):
+            print(f"posting {pick.get('postingId')}: applied for on the employer's {pick['method']}, no package", file=sys.stderr)
+            continue
         cv = pick.get("cv")
         if cv_bases and cv not in cv_bases:
             sys.exit(f"posting {pick.get('postingId')}: cv '{cv}' is not a CV base in {args.config} ({', '.join(cv_bases)})")
