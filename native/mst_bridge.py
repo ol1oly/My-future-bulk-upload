@@ -575,6 +575,19 @@ def handle(msg):
         return {"ok": True, "home": str(HOME), "letters": letter_support(), "cvBuilder": bool(cv_builder()), "api": API_VERSION}
     if cmd == "tailorCv":
         return {"ok": True, **tailor_cv(msg.get("posting") or {}, msg.get("projects"), msg.get("lang"), bool(msg.get("noReuse")))}
+    if cmd == "cvSettings":  # the builder's own settings form: {settings, fields[{key, type, label, ...}], path}
+        if not cv_builder():
+            return {"ok": True, "available": False}
+        if msg.get("settings") is None:
+            return {**run_cv_builder(["settings"], timeout=60), "available": True}
+        HOME.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile("w", suffix=".json", dir=HOME, delete=False, encoding="utf-8") as f:
+            json.dump({"settings": msg["settings"], "expectedUpdatedAt": msg.get("expectedUpdatedAt")}, f, ensure_ascii=False)
+            body = f.name
+        try:
+            return {**run_cv_builder(["settings", "--save", body], timeout=60), "available": True}
+        finally:
+            Path(body).unlink(missing_ok=True)
     if cmd == "cvCatalog":
         return run_cv_builder(["catalog"] + (["--lang", msg["lang"]] if msg.get("lang") in ("en", "fr") else []), timeout=60)
     if cmd == "draftLetter":

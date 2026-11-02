@@ -24,6 +24,9 @@
       .status.bad { color: #c4122d; }
       .box { border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; background: var(--surface); }
       #digest { min-height: 260px; font: 12.5px/1.5 Consolas, monospace; background: #fff; }
+      input[type=number] { width: 80px; padding: 6px 8px; border: 1px solid #cdd1d6; border-radius: 8px; font: inherit; }
+      .choices { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 2px 12px; }
+      .choices label.inline { margin: 2px 0; }
       #warning { display: none; }
       #warning.show { display: block; }
     </style>
@@ -74,6 +77,16 @@
         <button id="save" type="button">Save settings</button>
         <span id="saveStatus" class="status"></span>
       </div>
+
+      <section id="cvSection" hidden>
+        <h2>How projects are picked for tailored CVs</h2>
+        <p class="note">Used by your CV builder when you choose <b>Tailored CV</b>. Saved in <code id="cvPath"></code>.</p>
+        <div id="cvFields"></div>
+        <div class="row">
+          <button id="saveCv" type="button">Save CV settings</button>
+          <span id="cvStatus" class="status"></span>
+        </div>
+      </section>
 
       <h2>Facts summary</h2>
       <div class="row" style="margin-top:0">

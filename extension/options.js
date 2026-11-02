@@ -106,5 +106,59 @@
     }
   });
 
+  // ---------- tailored CVs (optional CV builder): the builder describes its own fields ----------
+  // Field types: number {min,max} | select {options:[[value,label]]} | checkbox | text {placeholder} | projects {choices:[{id,name}]}.
+  let cvUpdatedAt = "", cvFieldList = [];
+  const el = (tag, props = {}, ...children) => { const n = Object.assign(document.createElement(tag), props); n.append(...children); return n; };
+  function cvField(f, value) {
+    const id = `cv_${f.key}`;
+    const help = f.help ? el("small", { textContent: f.help }) : "";
+    if (f.type === "checkbox") return el("div", {}, el("label", { className: "inline" }, el("input", { type: "checkbox", id, checked: Boolean(value) }), el("span", { textContent: f.label })), help);
+    let control;
+    if (f.type === "number") control = el("input", { type: "number", id, value: value ?? "", min: f.min ?? "", max: f.max ?? "" });
+    else if (f.type === "select") control = el("select", { id }, ...(f.options || []).map(([v, t]) => el("option", { value: v, textContent: t, selected: v === value })));
+    else if (f.type === "projects") {
+      const picked = new Set(value || []);
+      control = el("div", { className: "choices", id }, ...(f.choices || []).map((c) =>
+        el("label", { className: "inline" }, el("input", { type: "checkbox", value: c.id, checked: picked.has(c.id) }), el("span", { textContent: c.name }))));
+    } else control = el("textarea", { id, rows: 3, value: value || "", placeholder: f.placeholder || "" });
+    return el("div", {}, el("label", { htmlFor: id, textContent: f.label }), control, help);
+  }
+  function cvValue(f) {
+    const node = document.getElementById(`cv_${f.key}`);
+    if (f.type === "checkbox") return node.checked;
+    if (f.type === "number") return Number(node.value);
+    if (f.type === "projects") return [...node.querySelectorAll("input:checked")].map((i) => i.value);
+    return node.value;
+  }
+  function fillCv(reply) {
+    if (!reply?.available) return;
+    $("#cvSection").hidden = false;
+    cvUpdatedAt = reply.settings.updatedAt || "";
+    cvFieldList = reply.fields || [];
+    $("#cvPath").textContent = reply.path || "";
+    $("#cvFields").replaceChildren(...cvFieldList.map((f) => cvField(f, reply.settings[f.key])));
+  }
+  async function loadCv() {
+    try { fillCv(await host({ cmd: "cvSettings" })); } catch (error) {
+      $("#cvSection").hidden = false;
+      status($("#cvStatus"), `The CV builder's settings couldn't be read: ${error.message}`, true);
+      $("#saveCv").disabled = true;
+    }
+  }
+  $("#saveCv").addEventListener("click", async () => {
+    const button = $("#saveCv");
+    button.disabled = true;
+    try {
+      const settings = Object.fromEntries(cvFieldList.map((f) => [f.key, cvValue(f)]));
+      const reply = await host({ cmd: "cvSettings", settings, expectedUpdatedAt: cvUpdatedAt });
+      fillCv(reply);
+      status($("#cvStatus"), "Saved.");
+    } catch (error) {
+      status($("#cvStatus"), error.message, true);
+    } finally { button.disabled = false; }
+  });
+
   load();
+  loadCv();
 })();
