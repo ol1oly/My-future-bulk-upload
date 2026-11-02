@@ -136,6 +136,11 @@ def main():
     html = ((UI / "install.template.html").read_text(encoding="utf-8").replace("__BUNDLE_B64__", b64)
             .replace("__SMART_B64__", smart_b64).replace("__VERSION__", VERSION))
     (UI / "install.html").write_text(html, encoding="utf-8")
+    # Same page inside the extension (Smart search links to it). MV3 pages refuse inline scripts, so move it to a file.
+    start, end = html.index("<script>"), html.index("</script>")
+    (EXTENSION / "install.js").write_text(html[start + len("<script>"):end].strip() + "\n", encoding="utf-8")
+    (EXTENSION / "install.html").write_text(html[:start] + '<script src="install.js"></script>' + html[end + len("</script>"):],
+                                            encoding="utf-8")
     print(f"v{VERSION} panel.bundle.js: {len(bundle)} chars; smart-search.bundle.js: {len(smart)} chars; install.html: {len(html)} chars")
 
 

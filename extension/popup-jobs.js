@@ -18,6 +18,8 @@
 
   async function openSmartSearch() {
     if (!currentTab) return;
+    // The panel runs in the page's MAIN world (no chrome.runtime), so hand it the extension's install page URL.
+    await chrome.scripting.executeScript({ target: { tabId: currentTab.id }, world: "MAIN", func: (url) => { globalThis.__mstInstallUrl = url; }, args: [chrome.runtime.getURL("install.html")] });
     await chrome.scripting.executeScript({ target: { tabId: currentTab.id }, world: "MAIN", files: ["lib/jobs.js", "orbis-board.js", "smart-search.js"] });
     window.close();
   }

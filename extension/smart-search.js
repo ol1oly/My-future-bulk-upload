@@ -7,6 +7,8 @@
   const ROOT_ID = "mst-smart-search";
   const PREFS_KEY = "mst.smartSearch.prefs";
   const LANG_KEY = "mst.smartSearch.lang";
+  // The extension passes its bundled install page; the bookmarklet has none, so it links to the repo (install page there).
+  const REPO_URL = "https://github.com/ol1oly/My-future-bulk-upload";
   let lang = (() => {
     try { const saved = localStorage.getItem(LANG_KEY); if (saved === "fr" || saved === "en") return saved; } catch (error) { /* ignore */ }
     return /^fr/i.test(document.documentElement.lang || navigator.language || "") ? "fr" : "en";
@@ -102,7 +104,9 @@
       "year": "année",
       "text": "texte",
       "excluded": "exclue",
-      "low score": "score faible"
+      "low score": "score faible",
+      "Install page": "Page d'installation",
+      "Bookmarklets for the documents panel and Smart search": "Favoris pour le panneau des documents et la recherche avancée"
   };
   // English text is the key; French comes from FR (same approach as the bookmarklet panel's t()).
   const t = (text, vars) => String(lang === "fr" && FR[text] ? FR[text] : text).replace(/\{(\w+)\}/g, (m, k) => (vars && vars[k] != null ? vars[k] : m));
@@ -143,6 +147,8 @@
 #${ROOT_ID} header{grid-column:1/-1;display:flex;gap:12px;align-items:center;padding:12px 16px;border-bottom:1px solid #e3e5e8}
 #${ROOT_ID} header h2{margin:0;font-size:16px;font-weight:750}
 #${ROOT_ID} header .mst-status{flex:1;color:#68707d}
+#${ROOT_ID} header .mst-install{font-size:12px;color:#68707d;text-decoration:none;white-space:nowrap}
+#${ROOT_ID} header .mst-install:hover{color:#c4122d;text-decoration:underline}
 #${ROOT_ID} aside{padding:14px 16px;border-right:1px solid #e3e5e8;overflow:auto;background:#f6f7f8}
 #${ROOT_ID} aside label{display:block;margin:10px 0 4px;font-weight:650;font-size:12px}
 #${ROOT_ID} aside input[type=text],#${ROOT_ID} aside input[type=number],#${ROOT_ID} aside select,#${ROOT_ID} aside textarea{width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid #cdd1d6;border-radius:6px;font:inherit;background:#fff}
@@ -184,6 +190,7 @@
     el("div", { class: "mst-shell" },
       el("header", {},
         L(el("h2"), "textContent", "Smart search"), status,
+        L(L(el("a", { class: "mst-install", href: globalThis.__mstInstallUrl || REPO_URL, target: "_blank", rel: "noopener" }), "textContent", "Install page"), "title", "Bookmarklets for the documents panel and Smart search"),
         el("button", { type: "button", textContent: lang === "fr" ? "EN" : "FR", title: "English / Français", onclick: (event) => switchLang(event.currentTarget) }),
         L(L(el("button", { type: "button", onclick: () => { board.clearCache(); scan(); } }), "textContent", "Rescan"), "title", "Reload every posting from myFuture"),
         L(el("button", { type: "button", onclick: () => { root.hidden = true; } }), "textContent", "Close")),
