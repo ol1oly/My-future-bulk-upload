@@ -156,7 +156,7 @@ importScripts("lib/jobs.js");
       const [cvs, transcripts] = await inPage(tabId, async () => [
         await window.__mfFrame.listDocs("CV/Resume"), await window.__mfFrame.listDocs("Unofficial Transcript")]);
       for (const app of apps) {
-        app.cv = newestByBase(cvs, app.cv);
+        app.cv = app.cvName || newestByBase(cvs, app.cv); // a tailored CV has one exact name (uploaded below if new)
         if (app.transcript) app.transcript = newestByBase(transcripts, app.transcript);
       }
       log.steps.push({ step: "resolve", result: { cvs: cvs.length, transcripts: transcripts.length, used: apps.map((a) => [a.package, a.cv, a.transcript || ""]) } });
@@ -164,17 +164,31 @@ importScripts("lib/jobs.js");
 
     // Idempotent: letters and packages already on myFuture are kept and counted as done, never uploaded or built twice.
     note(tabId, "Reading your cover letters and packages on myFuture…");
-    const [existingLetters, existingPackages] = await inPage(tabId, async () => [
-      await window.__mfFrame.listDocs("Cover Letter"), await window.__mfFrame.listDocs("Application Packages")]);
+    const [existingLetters, existingPackages, existingCvs] = await inPage(tabId, async () => [
+      await window.__mfFrame.listDocs("Cover Letter"), await window.__mfFrame.listDocs("Application Packages"),
+      await window.__mfFrame.listDocs("CV/Resume")]);
     const hasLetter = (name) => existingLetters.some((d) => d.name === name);
     const hasPackage = (name) => existingPackages.some((d) => d.name === name);
+    const hasCv = (name) => existingCvs.some((d) => d.name === name);
+    for (const app of apps) if (app.cvName) app.cv = app.cvName;
     const letters = apps.filter((app) => app.letterPdf && app.letterName && !hasLetter(app.letterName));
     const lettersThere = apps.filter((app) => app.letterName && hasLetter(app.letterName));
+    // Tailored CVs: one upload per distinct document (several packages may share one CV).
+    const cvUploads = [...new Map(apps.filter((app) => app.cvPdf && app.cvName && !hasCv(app.cvName)).map((app) => [app.cvName, app])).values()];
+    const uploadList = [...letters.map((app) => ({ path: app.letterPdf, name: app.letterName, type: "13" })),
+      ...cvUploads.map((app) => ({ path: app.cvPdf, name: app.cvName, type: "14" }))];
     let uploadResults = [];
-    if (letters.length) {
-      note(tabId, `${dryRun ? "Checking" : "Uploading"} ${letters.length} cover letter(s)…`);
+    if (uploadList.length) {
+      note(tabId, `${dryRun ? "Checking" : "Uploading"} ${letters.length} cover letter(s)${cvUploads.length ? ` and ${cvUploads.length} tailored CV(s)` : ""}…`);
       const files = [];
-      for (const app of letters) files.push(await host({ cmd: "readFile", path: app.letterPdf }));
+      for (const u of uploadList) files.push(await host({ cmd: "readFile", path: u.path }));
+      // Two tailored CVs share a file name (the name employers see): give each upload a distinct one.
+      const seen = new Set();
+      files.forEach((f, i) => {
+        let name = f.name;
+        for (let n = 2; seen.has(name); n += 1) name = f.name.replace(/(\.pdf)?$/i, `_${n}.pdf`);
+        seen.add(name); f.name = name; uploadList[i].file = name;
+      });
       const upload = await inPage(tabId, async (src, docs, fileList, dry) => {
         const files = fileList.map((file) => {
           const binary = atob(file.base64);
@@ -183,16 +197,22 @@ importScripts("lib/jobs.js");
           return new File([bytes], file.name, { type: "application/pdf" });
         });
         return window.__mfFrame.upload(src, docs, files, dry);
-      }, [await script("upload.js"), letters.map((app, i) => ({ file: files[i].name, name: app.letterName, type: "13" })), files.map((f) => ({ name: f.name, base64: f.base64 })), dryRun]);
+      }, [await script("upload.js"), uploadList.map((u) => ({ file: u.file, name: u.name, type: u.type })), files.map((f) => ({ name: f.name, base64: f.base64 })), dryRun]);
       uploadResults = upload?.results || [];
       log.steps.push({ step: "upload", result: { ...upload, alreadyThere: lettersThere.map((a) => a.letterName) } });
-      if (!dryRun && !upload?.ok) log.problem = "Some cover letters were not uploaded; their packages were skipped.";
+      if (!dryRun && !upload?.ok) log.problem = "Some documents were not uploaded; their packages were skipped.";
     } else if (lettersThere.length) {
       log.steps.push({ step: "upload", result: { ok: true, results: [], alreadyThere: lettersThere.map((a) => a.letterName) } });
     }
-    const letterReady = (app) => !app.letterName || hasLetter(app.letterName) || uploadResults.some((r) => r.name === app.letterName && r.status === "saved");
+    const saved = (name) => uploadResults.some((r) => r.name === name && r.status === "saved");
+    const letterReady = (app) => !app.letterName || hasLetter(app.letterName) || saved(app.letterName);
+    const cvReady = (app) => !app.cvName || hasCv(app.cvName) || saved(app.cvName);
 
-    const toCreate = apps.filter((app) => app.package && app.createPackage !== false && !hasPackage(app.package) && (dryRun || letterReady(app)));
+    // A dry run can't check a package whose tailored CV isn't on myFuture yet (packages.js needs the exact CV name).
+    const cvPending = dryRun ? apps.filter((app) => app.cvName && !hasCv(app.cvName)) : [];
+    if (cvPending.length) log.steps.push({ step: "cv pending upload", result: cvPending.map((a) => [a.package, a.cvName]) });
+    const toCreate = apps.filter((app) => app.package && app.createPackage !== false && !hasPackage(app.package)
+      && !cvPending.includes(app) && (dryRun || (letterReady(app) && cvReady(app))));
     let created = null;
     if (toCreate.length) {
       note(tabId, `${dryRun ? "Checking" : "Creating"} ${toCreate.length} application package(s)…`);
@@ -219,6 +239,7 @@ importScripts("lib/jobs.js");
         if (hasPackage(app.package) || r?.status === "created") entry.packageStatus = "done";
         else if (r) entry.packageStatus = "failed";
         else if (!letterReady(app)) { entry.packageStatus = "todo"; entry.error = "Cover letter not uploaded, so the package was not built."; }
+        else if (!cvReady(app)) { entry.packageStatus = "todo"; entry.error = "Tailored CV not uploaded, so the package was not built."; }
       }
     });
 
@@ -610,10 +631,21 @@ importScripts("lib/jobs.js");
     await ensureFrameOps(tabId);
     const day = new Date().toISOString().slice(0, 10);
     const org = String(item.organization || "Job").replace(/[^A-Za-z0-9]+/g, "").slice(0, 24) || "Job";
-    const base = String(choice.cv).replace(DATED, "");
-    let packageName = `${base}_${org}_${day}`;
-    const docs = await inPage(tabId, async () => [await window.__mfFrame.listDocs("Application Packages"), await window.__mfFrame.listDocs("Cover Letter")]);
-    for (let n = 2; docs[0].some((d) => d.name === packageName); n += 1) packageName = `${base}_${org}${n}_${day}`;
+    const tailored = choice.tailored?.pdf && JobTools.isTailoredCv(choice.tailored.docName) ? choice.tailored : null;
+    const cvName = tailored ? tailored.docName : choice.cv;
+    if (!cvName) throw new Error("Choose a CV first.");
+    const docs = await inPage(tabId, async () => [await window.__mfFrame.listDocs("Application Packages"), await window.__mfFrame.listDocs("Cover Letter"),
+      await window.__mfFrame.listDocs("CV/Resume")]);
+    const packageFor = (n) => tailored ? JobTools.tailoredPackageName(cvName, org, day, n)
+      : `${String(cvName).replace(DATED, "")}_${org}${n > 1 ? n : ""}_${day}`;
+    let packageName = packageFor(1);
+    for (let n = 2; docs[0].some((d) => d.name === packageName); n += 1) packageName = packageFor(n);
+    const uploads = []; // [{ doc, file }]: one upload call, so a letter is never left without its CV
+    // The same tailored CV (same projects and skills) is one document on myFuture, shared by every package that uses it.
+    if (tailored && !docs[2].some((d) => d.name === cvName)) {
+      const file = await host({ cmd: "readFile", path: tailored.pdf });
+      uploads.push({ doc: { file: file.name, name: cvName, type: "14" }, file: { name: file.name, base64: file.base64 } });
+    }
     let letterName = choice.coverLetter || "";
     if (choice.claude?.pdf || choice.claude?.text) {
       let pdf = choice.claude.pdf; // already made and viewed: upload exactly that file
@@ -627,29 +659,51 @@ importScripts("lib/jobs.js");
     if (choice.letterFile) {
       letterName = `cl_${org}_${day}`;
       for (let n = 2; docs[1].some((d) => d.name === letterName); n += 1) letterName = `cl_${org}${n}_${day}`;
-      note(tabId, "Uploading your cover letter…");
-      const upload = await inPage(tabId, async (src, doc, file) => {
-        const binary = atob(file.base64);
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-        return window.__mfFrame.upload(src, [doc], [new File([bytes], file.name, { type: "application/pdf" })], false);
-      }, [await script("upload.js"), { file: choice.letterFile.name, name: letterName, type: "13" }, choice.letterFile]);
-      if (!upload?.ok) throw new Error("The cover letter could not be uploaded.");
+      // A file name can't reach myFuture twice in one upload: the CV and the letter keep distinct names.
+      uploads.push({ doc: { file: choice.letterFile.name, name: letterName, type: "13" }, file: choice.letterFile });
+    }
+    if (uploads.length) {
+      note(tabId, `Uploading your ${uploads.map((u) => (u.doc.type === "14" ? "tailored CV" : "cover letter")).join(" and ")}…`);
+      const upload = await inPage(tabId, async (src, docList, fileList) => {
+        const files = fileList.map((file) => {
+          const binary = atob(file.base64);
+          const bytes = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+          return new File([bytes], file.name, { type: "application/pdf" });
+        });
+        return window.__mfFrame.upload(src, docList, files, false);
+      }, [await script("upload.js"), uploads.map((u) => u.doc), uploads.map((u) => u.file)]);
+      if (!upload?.ok) throw new Error(`The ${tailored ? "CV or cover letter" : "cover letter"} could not be uploaded.`);
     }
     if (choice.letterFile) await keepLetter(String(item.postingId), choice.letterFile);
     note(tabId, `Creating package ${packageName}…`);
     const created = await inPage(tabId, (src, list) => window.__mfFrame.packages(src, list, false),
-      [await script("packages.js"), [{ name: packageName, cv: choice.cv, transcript: choice.transcript || null, coverLetter: letterName || null }]]);
+      [await script("packages.js"), [{ name: packageName, cv: cvName, transcript: choice.transcript || null, coverLetter: letterName || null }]]);
     if (!created?.ok) throw new Error(`The package could not be created (${created?.results?.[0]?.status || "unknown error"}).`);
     await updateApps((s) => {
       const id = String(item.postingId);
       s[id] = { ...(s[id] || {}), postingId: id, title: item.title || "", organization: item.organization || "", board: item.board || "internshipscoop",
-        package: packageName, packageStatus: "done", letterName, letter: letterName ? "done" : "none", cvUsed: choice.cv, transcriptUsed: choice.transcript || "",
+        package: packageName, packageStatus: "done", letterName, letter: letterName ? "done" : "none", cvUsed: cvName, transcriptUsed: choice.transcript || "",
+        cvTailored: tailored ? { docName: cvName, projects: tailored.projects || [] } : null,
         applied: false, inPlan: true, source: "extension" };
     });
     const message = `Package ${packageName} is ready. Press Apply to open the form.`;
     note(tabId, message);
     return { message, packageName };
+  }
+
+  // Tailored CV (optional CV builder on this computer): reads the posting, the builder picks projects from the student's
+  // own CV entries and either names an existing CV that already fits ("variant") or builds a new one ("tailored").
+  async function tailorCv(tabId, item, opts = {}) {
+    note(tabId, "Reading the posting…");
+    const d = await postingDetails(tabId, item);
+    note(tabId, opts.projects?.length ? "Building your CV with the projects you picked…" : "Choosing the projects that fit this posting…");
+    const r = await host({ cmd: "tailorCv", posting: { title: d.title || item.title, organization: d.organization || item.organization,
+      description: d.description, qualifications: d.qualifications, lang: d.language }, projects: opts.projects || null, noReuse: Boolean(opts.noReuse) });
+    const tailored = { kind: r.kind, variant: r.variant || "", docName: r.docName || "", pdf: r.pdf, lang: r.lang, projects: r.projects || [],
+      ranked: r.ranked || [], why: r.why || {}, skills: r.skills || {}, source: r.source || "", warnings: r.warnings || [], builtAt: new Date().toISOString() };
+    note(tabId, r.kind === "variant" ? `Your existing CV ${r.variant} already fits this posting.` : `Tailored CV ready: ${tailored.projects.join(", ")}.`);
+    return { tailored };
   }
 
   // "Ask Claude to prepare": remembered in the extension and written to ~/.mst/out/requests.json for Claude.
@@ -689,7 +743,7 @@ importScripts("lib/jobs.js");
       const ping = await host({ cmd: "ping" });
       const { plan } = await host({ cmd: "getPlan" });
       await seedApps(plan);
-      return { ok: true, api: BRIDGE_API, home: ping.home, plan, letters: ping.letters, apps: await loadApps() };
+      return { ok: true, api: BRIDGE_API, home: ping.home, plan, letters: ping.letters, cvBuilder: Boolean(ping.cvBuilder), apps: await loadApps() };
     } catch (error) {
       return { ok: false, api: BRIDGE_API, error: error.message || String(error), apps: await loadApps() };
     }
@@ -718,6 +772,8 @@ importScripts("lib/jobs.js");
       BRIDGE_UNHIDE: () => unhideAll(),
       APPLY_DONE: () => setApplyTab(_sender?.tab?.id ?? message.tabId, null).then(() => ({})),
       BRIDGE_PREPARE_ONE: () => prepareOne(message.tabId, message.item, message.choice),
+      BRIDGE_TAILOR_CV: () => tailorCv(message.tabId, message.item, { projects: message.projects, noReuse: message.noReuse }),
+      BRIDGE_CV_CATALOG: () => host({ cmd: "cvCatalog", lang: message.lang }),
       BRIDGE_DRAFT_LETTER: () => draftLetter(message.tabId, message.item, { feedback: message.feedback, previous: message.previous }),
       BRIDGE_MAKE_LETTERS: () => makeLetters(message.tabId, message.items),
       BRIDGE_VIEW_PATH: () => viewPath(message.path),

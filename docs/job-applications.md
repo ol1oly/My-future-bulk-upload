@@ -69,3 +69,25 @@ browser: `native/mst_bridge.py` (Chrome native messaging host, allowed for this 
 `extension/bridge.js` (service worker) runs: resolve newest CV/transcript names (same overview → "all" → list method
 as the bookmarklet panel's `listDocs`), upload letters (`upload.js` with `__MF.files`), create packages
 (`packages.js`), and optionally open one application form and save its structure (`probe-<id>.json`).
+
+## Tailored CVs (optional, 2026-11)
+
+A student who keeps their CV as LaTeX entries can plug in a **CV builder**: `~/.claude/myfuture/config.json`
+`jobs.cvBuilder` = a command as a list (`["python", "C:/path/cv_builder.py"]`). The native host runs it as
+`<cmd> build --posting <file> [--projects a,b] [--lang en|fr] [--no-reuse]` and `<cmd> catalog`; it prints one JSON line
+(`{ok, kind: "variant"|"tailored", pdf, docName: "<lang>_tailored_<id>", variant, projects, why, warnings}`). Without
+it, nothing changes (the CV option is hidden).
+
+- **AI or not.** Choosing *which* projects fit a posting is semantic (a "real-time systems" role and a live-audio
+  project share no keyword), so Claude ranks them, but only from a closed list of the student's own entries, and the
+  bullets are copied verbatim: no CV text is written by AI. The skills line is deterministic (a curated list with
+  evidence per skill), since AI adds risk there and nothing else.
+- **myFuture.** Popup "Package…" and the letters page offer *Tailored CV*. If an existing CV already holds the best
+  projects, the builder says so (`kind: "variant"`) and that CV is used. A tailored CV is uploaded as a CV (type 14)
+  named `<lang>_tailored_<id>` (one document per distinct CV, shared by packages that use the same one), together with
+  the letter in one upload; the package is `<lang>_tailored_<Org>_<date>`. Tailored names are never picked as a
+  default CV (`isTailoredCv`) and, having no date, are never cleanup candidates.
+- **Plans.** `make_plan.py` picks accept `cvPdf` + `cvName`; Check plan reports those packages as "CV pending upload"
+  (packages.js needs the exact CV name, which only exists after the upload).
+- **Letters.** Letter checks now separate numbers taken from the posting (fine about the job, wrong about the student)
+  from numbers found nowhere, and flag links or contact details that aren't in the student's facts.

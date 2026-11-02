@@ -40,7 +40,9 @@ transcript base type 15), and `jobs` = `{applicationsFolder, letterTemplates, pr
    requirements, each with the profile fact that proves it; never stretch a fact); both end with a period. Settings in
    `~/.claude/myfuture/letter-settings.json` apply (style, instructions, `forbidCompanies`); `SALUTATION` from `coverLetter.slots.SALUTATION`; then
    `powershell -NoProfile -ExecutionPolicy Bypass -File R/apply/fill_letter.ps1 -Template <tpl.docx> -OutStem <root>/<applicationsFolder>/<date>_<org>_<label>/<Name>_<org> -SlotsJson <slots.json> -Forbid "<letter-settings forbidCompanies, comma-separated>"`. Read each PDF once.
-4. Plan: write picks (`postingId, board, organization, label, title, cv base, transcript bool, letterPdf`) and run
+4. Plan: write picks (`postingId, board, organization, label, title, cv base, transcript bool, letterPdf`; with a CV
+   builder set up (`jobs.cvBuilder`, see `docs/job-applications.md`), a pick may instead carry `cvPdf` + `cvName` from its
+   `build` output) and run
    `python R/apply/make_plan.py <picks.json> [--probe <one posting id>]`.
 5. Tell the student: open myFuture → extension → **Check plan** (saves nothing) → **Run plan** (resolves newest CV/transcript,
    uploads letters, builds one package per posting). Read `~/.mst/out/run-*.json`; report packages created and errors.

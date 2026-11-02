@@ -12,6 +12,8 @@ picks.json: [{"postingId": "23133", "board": "internshipscoop", "organization": 
   transcript  true -> attach your transcript base
   letterPdf   optional cover letter PDF to upload (type 13) and put in this application's package
   method      optional "myfuture" | "website" | "email"; website/email postings are applied for outside myFuture, so skipped
+  cvPdf       optional tailored CV PDF (from a CV builder) + cvName "<lang>_tailored_<id>": uploaded as a CV (type 14)
+              unless that document already exists, and used instead of "cv"
 
 Usage:  python make_plan.py picks.json [--probe <postingId>] [--config path] [--out path]
 Then open myFuture, click the extension → Check plan → Run plan.
@@ -52,17 +54,30 @@ def main():
         if pick.get("method") in ("website", "email"):
             print(f"posting {pick.get('postingId')}: applied for on the employer's {pick['method']}, no package", file=sys.stderr)
             continue
-        cv = pick.get("cv")
-        if cv_bases and cv not in cv_bases:
-            sys.exit(f"posting {pick.get('postingId')}: cv '{cv}' is not a CV base in {args.config} ({', '.join(cv_bases)})")
         org = slug(pick.get("organization")) + (f"-{slug(pick['label'])}" if pick.get("label") else "")
-        name = f"{cv}_{org}_{args.date}"
+        tailored = None
+        if pick.get("cvPdf"):
+            cv_name = str(pick.get("cvName") or "")
+            if not re.fullmatch(r"(en|fr)_tailored_[A-Za-z0-9]+", cv_name):
+                sys.exit(f"posting {pick.get('postingId')}: cvName must look like en_tailored_<id> (got '{cv_name}')")
+            pdf = Path(pick["cvPdf"])
+            if not pdf.is_file() or pdf.suffix.lower() != ".pdf":
+                sys.exit(f"tailored CV not found or not a PDF: {pdf}")
+            tailored = (cv_name, str(pdf.resolve()))
+            cv, stem = cv_name, f"{cv_name[:2]}_tailored"  # package: en_tailored_<Org>_<date>
+        else:
+            cv = stem = pick.get("cv")
+            if cv_bases and cv not in cv_bases:
+                sys.exit(f"posting {pick.get('postingId')}: cv '{cv}' is not a CV base in {args.config} ({', '.join(cv_bases)})")
+        name = f"{stem}_{org}_{args.date}"
         n = 2
         while name in used:  # several postings at one company
-            name, n = f"{cv}_{org}{n}_{args.date}", n + 1
+            name, n = f"{stem}_{org}{n}_{args.date}", n + 1
         used.add(name)
         app = {"postingId": str(pick["postingId"]), "board": pick.get("board", "internshipscoop"),
                "organization": pick.get("organization", ""), "title": pick.get("title", ""), "package": name, "cv": cv}
+        if tailored:
+            app["cvName"], app["cvPdf"] = tailored
         if pick.get("transcript"):
             if not transcript:
                 sys.exit(f"posting {pick['postingId']} wants a transcript but {args.config} has no type 15 document")
@@ -72,7 +87,7 @@ def main():
             if not pdf.is_file() or pdf.suffix.lower() != ".pdf":
                 sys.exit(f"letter not found or not a PDF: {pdf}")
             app["letterPdf"] = str(pdf.resolve())
-            app["letterName"] = "cl_" + name[len(cv) + 1:]
+            app["letterName"] = "cl_" + name[len(stem) + 1:]
         apps.append(app)
 
     plan = {"createdAt": args.date, "resolveNewest": True, "submit": False, "applications": apps}

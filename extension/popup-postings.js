@@ -174,10 +174,77 @@
     drafts = mstBatch;
     await chrome.storage.local.set({ mstBatch });
   }
-  const draftState = (b) => (b?.text && b.posting && b.status !== "built"
-    ? { drafted: b.posting, sentence: b.text, style: b.style, pdf: b.pdf || "", pdfText: b.pdfText || "", letter: "__claude",
-      ...(b.cv ? { cv: b.cv } : {}), ...(b.transcript !== undefined ? { transcript: b.transcript } : {}) }
-    : {});
+  const draftState = (b) => ({
+    // A tailored CV built for this posting (kept until its package is built), even without a letter draft.
+    ...(b?.tailored && b.status !== "built" ? { tailored: b.tailored, ...(b.cv === "__tailored" ? { cv: "__tailored" } : {}) } : {}),
+    ...(b?.text && b.posting && b.status !== "built"
+      ? { drafted: b.posting, sentence: b.text, style: b.style, pdf: b.pdf || "", pdfText: b.pdfText || "", letter: "__claude",
+        ...(b.cv ? { cv: b.cv } : {}), ...(b.transcript !== undefined ? { transcript: b.transcript } : {}) }
+      : {})
+  });
+  async function saveTailored(id, tailored, cvChoice) {
+    const { mstBatch = {} } = await chrome.storage.local.get({ mstBatch: {} });
+    mstBatch[id] = { ...(mstBatch[id] || {}), tailored, cv: cvChoice, ...(mstBatch[id]?.status === "built" ? { status: "" } : {}) };
+    drafts = mstBatch;
+    await chrome.storage.local.set({ mstBatch });
+  }
+  let cvCatalog = null; // projects the CV builder can use, per language (asked once per popup)
+  async function catalogFor(lang) {
+    if (!cvCatalog) {
+      const reply = await send({ type: "BRIDGE_CV_CATALOG" });
+      cvCatalog = reply?.ok ? reply.projects || {} : {};
+    }
+    return cvCatalog[lang] || [];
+  }
+
+  // Tailored CV controls: build (Claude picks the projects), see why, change the projects by hand, view the PDF.
+  function tailorControls(item, ref, state, onVariant) {
+    const box = el("div", { className: "tailor", hidden: true });
+    const info = el("small", { className: "recommend" });
+    const build = el("button", { type: "button", className: "secondary" });
+    const picks = el("div", { className: "tailor-projects" });
+    const rebuild = el("button", { type: "button", className: "link", textContent: "Rebuild with these projects", hidden: true });
+    const view = el("button", { type: "button", className: "link", textContent: "View CV", hidden: true });
+    box.append(info, build, picks, rebuild, view);
+    const checked = () => [...picks.querySelectorAll("input:checked")].map((i) => i.value);
+    const render = async () => {
+      const t = state.tailored;
+      build.textContent = !t ? "Build tailored CV" : t.kind === "variant" ? "Build a tailored CV anyway" : "Let Claude pick again";
+      view.hidden = !t?.pdf;
+      if (!t) { info.textContent = "Claude reads the posting and picks 3 or 4 of your projects (about 15 s). Bullets are copied from your CV files; skills come only from your list."; picks.replaceChildren(); rebuild.hidden = true; return; }
+      const reason = (id) => (t.why?.[id] ? ` (${t.why[id]})` : "");
+      info.textContent = (t.kind === "variant"
+        ? `Your existing CV ${t.variant} already has the best projects: ${t.projects.join(", ")}. Choose it in the list above, or build a tailored one anyway.`
+        : `Projects: ${t.projects.map((id) => id + reason(id)).join("; ")}.`)
+        + (t.warnings?.length ? ` Note: ${t.warnings.join("; ")}.` : "");
+      const options = await catalogFor(t.lang || "en");
+      picks.replaceChildren(...options.map((p) => el("label", { className: "check" },
+        el("input", { type: "checkbox", value: p.id, checked: t.projects.includes(p.id), onchange: () => { rebuild.hidden = false; } }),
+        ` ${p.name}`)));
+      rebuild.hidden = true;
+    };
+    async function go(opts) {
+      build.disabled = rebuild.disabled = true;
+      const label = build.textContent;
+      build.textContent = "Building your CV…";
+      try {
+        const reply = await send({ type: "BRIDGE_TAILOR_CV", item: ref, ...opts });
+        if (!reply?.ok) { say(`The CV builder failed: ${reply?.error || "no answer"}`, true); return; }
+        state.tailored = reply.tailored;
+        if (reply.tailored.kind === "variant") onVariant(reply.tailored.variant);
+        await saveTailored(item.postingId, state.tailored, state.cv);
+        say(reply.tailored.kind === "variant" ? `Your CV ${reply.tailored.variant} already fits this posting.` : "Tailored CV ready. View it before creating the package.");
+      } finally { build.disabled = rebuild.disabled = false; build.textContent = label; await render(); }
+    }
+    build.addEventListener("click", () => go({ noReuse: state.tailored?.kind === "variant" }));
+    rebuild.addEventListener("click", () => {
+      const ids = checked();
+      if (ids.length < 2) { say("Pick at least 2 projects.", true); return; }
+      go({ projects: ids, noReuse: true });
+    });
+    view.addEventListener("click", () => send({ type: "BRIDGE_VIEW_PATH", path: state.tailored.pdf }));
+    return { box, render };
+  }
 
   function packageForm(item, ref) {
     if (!docs?.cvs?.length) return el("p", { className: "app-error", textContent: "Press Sync first so the extension knows your CVs, transcripts and cover letters on myFuture." });
@@ -185,7 +252,11 @@
     const state = forms.get(item.postingId);
     const newest = (list) => JobTools.newestDocs(list, docs.uploaded);
     const select = (options, extra = []) => el("select", {}, ...extra.map(([v, t]) => el("option", { value: v, textContent: t })), ...options.map((name) => el("option", { value: name, textContent: name })));
-    const cv = select(newest(docs.cvs));
+    const cv = select(newest(docs.cvs), bridge?.cvBuilder ? [["__tailored", "Tailored CV: Claude picks projects for this posting"]] : []);
+    const tailor = tailorControls(item, ref, state, (variant) => {
+      const pick = JobTools.pickCv(newest(docs.cvs), variant);
+      if (pick.exact) { cv.value = pick.name; remember(); sync(); listFiles(); } // never a "closest name" guess
+    });
     const transcript = select(newest(docs.transcripts), [["", "No transcript"]]);
     const extra = [...(lettersReady() ? [["__claude", "Write one with Claude for this posting"]] : []), ["", "No cover letter"], ["__upload", "Upload a PDF…"]];
     const letter = select(newest(docs.coverLetters), extra);
@@ -223,6 +294,9 @@
       previewBtn.hidden = sentence.hidden;
       if (previewBtn.hidden) previewBox.hidden = true;
       filePreview.hidden = file.hidden || !file.files[0];
+      const wasHidden = tailor.box.hidden;
+      tailor.box.hidden = cv.value !== "__tailored";
+      if (wasHidden && !tailor.box.hidden) tailor.render();
       showPdfButtons();
     };
     const remember = () => { state.cv = cv.value; state.transcript = transcript.value; state.letter = letter.value; state.sentence = sentence.value; };
@@ -257,6 +331,7 @@
     }
 
     for (const control of [cv, transcript, letter]) control.addEventListener("change", () => { remember(); sync(); saveDraft(item.postingId, state); });
+    cv.addEventListener("change", () => { if (state.tailored) saveTailored(item.postingId, state.tailored, cv.value); });
     let saveTimer = 0;
     sentence.addEventListener("input", () => { remember(); clearTimeout(saveTimer); saveTimer = setTimeout(() => saveDraft(item.postingId, state), 400); });
     // Rewrite with an optional change, make the PDF, look at it; upload only when happy.
@@ -310,12 +385,21 @@
       if (!external) return;
       const letterPart = letter.value === "__claude" ? "Claude's letter (Make PDF, then View PDF to save it)"
         : letter.value === "__upload" ? "the PDF you picked" : letter.value ? `cover letter ${letter.value}` : "";
-      external.textContent = `No myFuture package for this one. On their site, upload: CV ${cv.value}${transcript.value ? `, transcript ${transcript.value}` : ""}${letterPart ? `, ${letterPart}` : ""} (the PDFs in your documents folder).`;
+      const cvPart = cv.value !== "__tailored" ? `CV ${cv.value}`
+        : state.tailored?.pdf ? `your tailored CV (${state.tailored.pdf})` : "your tailored CV (build it first)";
+      external.textContent = `No myFuture package for this one. On their site, upload: ${cvPart}${transcript.value ? `, transcript ${transcript.value}` : ""}${letterPart ? `, ${letterPart}` : ""} (the PDFs in your documents folder).`;
     };
     for (const control of [cv, transcript, letter]) control.addEventListener("change", listFiles);
     create.addEventListener("click", async () => {
       remember();
       const choice = { cv: cv.value, transcript: transcript.value, coverLetter: ["__upload", "__claude"].includes(letter.value) ? "" : letter.value };
+      if (cv.value === "__tailored") {
+        const t = state.tailored;
+        if (!t?.pdf) { say("Press Build tailored CV first.", true); return; }
+        if (t.kind === "variant") { say(`Choose ${t.variant} in the CV list (it already fits), or press Build a tailored CV anyway.`, true); return; }
+        choice.cv = "";
+        choice.tailored = { pdf: t.pdf, docName: t.docName, projects: t.projects };
+      }
       if (letter.value === "__claude") {
         if (!state.drafted || !sentence.value.trim()) { say("Press Write with Claude first.", true); return; }
         // Upload exactly the PDF the student looked at, if the text hasn't changed since.
@@ -335,7 +419,7 @@
     listFiles();
     return el("div", { className: "prepare" },
       why,
-      el("label", { textContent: "CV" }), cv,
+      el("label", { textContent: "CV" }), cv, tailor.box,
       el("label", { textContent: "Transcript" }), transcript,
       el("label", { textContent: "Cover letter" }), letter, file, filePreview, hint, sentence, change, write, previewBtn, previewBox, makePdf, viewPdf,
       external, create);

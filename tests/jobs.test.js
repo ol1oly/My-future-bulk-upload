@@ -188,3 +188,17 @@ assert.deepEqual(jobs.newestDocs(["transcript old", "transcript new"], { "transc
   ["transcript new", "transcript old"]);
 assert.equal(jobs.pickCv(jobs.newestDocs(["en_normal_2026-01-05", "zz_cv", "en_normal_2026-09-14"]), "en_normal").name, "en_normal_2026-09-14");
 console.log("Newest document tests passed.");
+
+// Tailored CVs (optional CV builder): never a default for another posting; package named after the company.
+assert.equal(jobs.isTailoredCv("en_tailored_ab12cd"), true);
+assert.equal(jobs.isTailoredCv("en_normal_2026-09-14"), false);
+assert.deepEqual(jobs.newestDocs(["en_tailored_ab12cd", "en_normal_2026-09-14"]), ["en_normal_2026-09-14"]);
+assert.equal(jobs.pickCv(["en_tailored_ab12cd", "fr_tailored_ff00aa", "en_normal_2026-09-14"], "en_fullstack").name, "en_normal_2026-09-14");
+assert.equal(jobs.pickCv(["en_tailored_ab12cd"], "en_normal").name, undefined);
+assert.equal(jobs.tailoredPackageName("fr_tailored_ab12cd", "Studio Nord Inc.", "2026-11-02"), "fr_tailored_StudioNordInc_2026-11-02");
+console.log("Tailored CV tests passed.");
+// The clash suffix survives a long company name (the name must change, or the uniqueness loop never ends).
+assert.notEqual(jobs.tailoredPackageName("en_tailored_ab", "International Business Machines", "2026-11-02", 2),
+  jobs.tailoredPackageName("en_tailored_ab", "International Business Machines", "2026-11-02"));
+assert.equal(jobs.tailoredPackageName("en_tailored_ab", "International Business Machines", "2026-11-02", 2), "en_tailored_InternationalBusinessMac2_2026-11-02");
+console.log("Tailored package name tests passed.");

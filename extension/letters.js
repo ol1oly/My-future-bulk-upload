@@ -3,10 +3,11 @@
 (() => {
   "use strict";
   const $ = (sel) => document.querySelector(sel);
-  const listEl = $("#list"), statusEl = $("#status"), writeBtn = $("#write"), writeAllBtn = $("#writeAll"), makeBtn = $("#make"), buildBtn = $("#build");
+  const listEl = $("#list"), statusEl = $("#status"), writeBtn = $("#write"), writeAllBtn = $("#writeAll"), makeBtn = $("#make"), buildBtn = $("#build"), tailorAllBtn = $("#tailorAll");
   const { letterText } = JobTools;
   const pdfCurrent = (b) => Boolean(b?.pdf && b.pdfText === b.text);
-  let myFutureTab = null, docs = null, postings = [], batch = {}, busy = false;
+  let myFutureTab = null, docs = null, postings = [], batch = {}, busy = false, cvBuilder = false;
+  const TAILORED = "__tailored"; // CV choice: a CV built for this posting by the optional CV builder
 
   const el = (tag, props = {}, ...children) => {
     const node = Object.assign(document.createElement(tag), props);
@@ -63,9 +64,10 @@
       return;
     }
     listEl.replaceChildren(...postings.map(card));
-    const active = postings.filter((p) => batch[p.postingId]?.text && batch[p.postingId].status !== "built" && batch[p.postingId].include !== false);
+    const open = (p) => batch[p.postingId] && batch[p.postingId].status !== "built" && batch[p.postingId].include !== false;
+    const active = postings.filter((p) => open(p) && batch[p.postingId].text);
     makeBtn.textContent = `2. Make PDFs (${active.filter((p) => !pdfCurrent(batch[p.postingId])).length})`;
-    buildBtn.textContent = `3. Upload & build packages (${active.filter((p) => !p.external).length})`;
+    buildBtn.textContent = `3. Upload & build packages (${postings.filter((p) => open(p) && !p.external && (batch[p.postingId].text || batch[p.postingId].cv === TAILORED)).length})`;
   }
 
   function card(p) {
@@ -77,7 +79,22 @@
     const pick = JobTools.pickCv(cvs, recommendedCv(p));
     const ordered = pick.name ? [pick.name, ...cvs.filter((n) => n !== pick.name)] : cvs;
     for (const name of ordered) cv.append(el("option", { value: name, textContent: name + (name === pick.name && recommendedCv(p) ? " (recommended)" : ""), selected: name === (b.cv || pick.name) }));
-    cv.addEventListener("change", () => { entry(p.postingId).cv = cv.value; saveBatch(); });
+    if (cvBuilder) cv.append(el("option", { value: TAILORED, textContent: "Tailored CV (Claude picks projects)", selected: b.cv === TAILORED }));
+    cv.addEventListener("change", () => { entry(p.postingId).cv = cv.value; saveBatch(); render(); });
+    const t = b.tailored;
+    const tailorBtn = el("button", { type: "button", className: "secondary", textContent: t ? "Pick again" : "Build CV", disabled: !myFutureTab || busy });
+    tailorBtn.addEventListener("click", async () => {
+      lock(true); // no Build packages / Tailored CVs for all while this one builds
+      say(`Choosing projects for ${p.organization}…`);
+      try { say((await tailorOne(p, t?.kind === "variant")) ? "CV ready." : "The CV failed; see the card.", !batch[p.postingId].tailored); }
+      finally { lock(false); }
+    });
+    const viewCv = el("button", { type: "button", className: "link", textContent: "View CV", hidden: !t?.pdf });
+    viewCv.addEventListener("click", () => send({ type: "BRIDGE_VIEW_PATH", path: t.pdf }));
+    const tailorRow = b.cv === TAILORED ? el("div", { className: "tools" }, tailorBtn, viewCv,
+      el("span", { className: "meta", textContent: !t ? "Claude picks 3 or 4 of your projects for this posting." : t.kind === "variant"
+        ? `Your CV ${t.variant} already fits (${t.projects.join(", ")}); it will be used. Pick again builds a tailored one anyway.`
+        : `Projects: ${t.projects.join(", ")}${t.warnings?.length ? ` (${t.warnings.join("; ")})` : ""}` })) : null;
     const transcript = el("select", {}, el("option", { value: "", textContent: "No transcript" }), ...newest(docs?.transcripts).map((n) => el("option", { value: n, textContent: n })));
     transcript.value = b.transcript ?? defaultTranscript(p);
     transcript.addEventListener("change", () => { entry(p.postingId).transcript = transcript.value; saveBatch(); });
@@ -111,6 +128,7 @@
         el("div", {}, el("strong", { textContent: `${p.organization || "Posting"}: ${p.title || p.postingId}` }),
           el("div", { className: "meta", textContent: p.deadlineText ? `deadline ${p.deadlineText}` : "" }))),
       el("div", { className: "fields" }, cv, transcript),
+      tailorRow,
       text,
       b.issues?.length ? el("div", { className: "issues", textContent: `Check: ${b.issues.join("; ")}` }) : null,
       el("div", { className: "tools" }, change, rewrite, previewBtn, viewBtn), preview, state);
@@ -122,6 +140,49 @@
       ? { ...(batch[p.postingId] || {}), text: letterText(reply), style: reply.style, issues: reply.issues, posting: reply.posting, recommendedCv: reply.cv, documents: reply.documents, status: "drafted", pdf: "", pdfError: "" }
       : { ...(batch[p.postingId] || {}), status: "error", error: reply?.error || "Claude's answer came back empty; reload the extension on chrome://extensions" };
     await saveBatch();
+  }
+
+  // Build (or rebuild) one posting's tailored CV; an existing CV that already fits comes back as kind "variant".
+  async function tailorOne(p, noReuse = false) {
+    const reply = await send({ type: "BRIDGE_TAILOR_CV", item: itemOf(p), noReuse });
+    if (reply?.ok) Object.assign(entry(p.postingId), { tailored: reply.tailored, ...(batch[p.postingId].status === "error" ? { status: "", error: "" } : {}) });
+    else Object.assign(entry(p.postingId), { status: "error", error: `CV: ${reply?.error || "no answer"}` });
+    await saveBatch();
+    return reply?.ok;
+  }
+
+  // The CV a package uses: a chosen document, or the tailored one (built now if needed). Variant = an existing CV.
+  async function cvChoice(p) {
+    const b = batch[p.postingId];
+    if (b.cv !== TAILORED) return { cv: b.cv || JobTools.pickCv(newest(docs?.cvs), recommendedCv(p)).name };
+    if (!b.tailored && !(await tailorOne(p))) return null;
+    const t = batch[p.postingId].tailored;
+    if (t.kind === "variant") {
+      const pick = JobTools.pickCv(newest(docs?.cvs), t.variant);
+      if (pick.exact) return { cv: pick.name };
+      Object.assign(entry(p.postingId), { status: "error", error: `CV ${t.variant} fits, but no myFuture document is named ${t.variant}_<date>. Press Sync, or pick a CV.` });
+      await saveBatch();
+      return null;
+    }
+    return { cv: "", tailored: { pdf: t.pdf, docName: t.docName, projects: t.projects } };
+  }
+
+  async function tailorAll() {
+    const targets = postings.filter((p) => !p.external && batch[p.postingId]?.include !== false && batch[p.postingId]?.status !== "built");
+    if (!targets.length) { say("No selected posting left."); return; }
+    lock(true);
+    try {
+      let failed = 0;
+      for (const [i, p] of targets.entries()) {
+        entry(p.postingId).cv = TAILORED;
+        if (batch[p.postingId].tailored) continue;
+        say(`Choosing projects ${i + 1} of ${targets.length}: ${p.organization}…`);
+        if (!(await tailorOne(p))) failed += 1;
+        render();
+      }
+      await saveBatch();
+      say(failed ? `${failed} CV(s) failed; see the ones marked in red.` : "CVs ready. View any of them, then build the packages.", Boolean(failed));
+    } finally { lock(false); }
   }
 
   async function makeAll() {
@@ -147,7 +208,7 @@
 
   function lock(on) {
     busy = on;
-    writeBtn.disabled = writeAllBtn.disabled = makeBtn.disabled = buildBtn.disabled = on || !myFutureTab;
+    writeBtn.disabled = writeAllBtn.disabled = makeBtn.disabled = buildBtn.disabled = tailorAllBtn.disabled = on || !myFutureTab;
     render();
   }
 
@@ -169,17 +230,20 @@
   }
 
   async function buildAll() {
-    const targets = postings.filter((p) => !p.external && batch[p.postingId]?.text && batch[p.postingId].include !== false && batch[p.postingId].status !== "built");
+    // A posting with a letter draft, or one set to a tailored CV (some postings ask for a CV only).
+    const targets = postings.filter((p) => !p.external && (batch[p.postingId]?.text || batch[p.postingId]?.cv === TAILORED) && batch[p.postingId].include !== false && batch[p.postingId].status !== "built");
     if (!targets.length) { say(postings.some((p) => p.external) ? "Nothing to build: external postings get a PDF only (Make PDFs), no package." : "Nothing to build: write letters first."); return; }
     lock(true);
     try {
       for (const [i, p] of targets.entries()) {
         const b = batch[p.postingId];
-        const cv = b.cv || JobTools.pickCv(newest(docs?.cvs), recommendedCv(p)).name;
         const transcript = b.transcript ?? defaultTranscript(p);
-        say(`Uploading ${i + 1} of ${targets.length}: ${p.organization} (${pdfCurrent(b) ? "your PDF" : "making the PDF first"}, then the package)…`);
+        say(`Preparing ${i + 1} of ${targets.length}: ${p.organization}${b.cv === TAILORED && !b.tailored ? " (building the CV first)" : ""}…`);
+        const cvPart = await cvChoice(p);
+        if (!cvPart) { render(); continue; }
+        say(`Uploading ${i + 1} of ${targets.length}: ${p.organization} (${!b.text ? "no letter" : pdfCurrent(b) ? "your PDF" : "making the PDF first"}, then the package)…`);
         const reply = await send({ type: "BRIDGE_PREPARE_ONE", item: itemOf(p),
-          choice: { cv, transcript, coverLetter: "", claude: { text: b.text, posting: b.posting, pdf: pdfCurrent(b) ? b.pdf : "" } } });
+          choice: { ...cvPart, transcript, coverLetter: "", ...(b.text ? { claude: { text: b.text, posting: b.posting, pdf: pdfCurrent(b) ? b.pdf : "" } } : {}) } });
         batch[p.postingId] = reply?.ok ? { ...b, status: "built", packageName: reply.packageName } : { ...b, status: "error", error: reply?.error || "no answer" };
         await saveBatch();
         render();
@@ -198,7 +262,10 @@
     writeAllBtn.addEventListener("click", () => writeAll(true));
     makeBtn.addEventListener("click", makeAll);
     buildBtn.addEventListener("click", buildAll);
+    tailorAllBtn.addEventListener("click", tailorAll);
     const status = await chrome.runtime.sendMessage({ type: "BRIDGE_STATUS" });
+    cvBuilder = Boolean(status?.cvBuilder);
+    tailorAllBtn.hidden = !cvBuilder;
     if (status && status.api !== JobTools.BRIDGE_API) say("The extension's background part is out of date. Open chrome://extensions and press the reload icon on myFuture Toolkit, then reopen this.", true);
     await load();
   }

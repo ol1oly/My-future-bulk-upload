@@ -346,17 +346,28 @@
 
   // Document names newest first: the date at the end of the name (en_fullstack_2026-09-14), else the upload date
   // myFuture shows (uploaded = { name: date }), else last. Names without either keep their order.
+  // Tailored CVs (built for one posting by an optional CV builder, named "<lang>_tailored_<id>") are left out: they
+  // are never a default for another posting.
   function newestDocs(names, uploaded = {}) {
     const when = (name) => {
       const dated = String(name).match(/_(\d{4}-\d{2}-\d{2})$/);
       const time = Date.parse(dated ? dated[1] : uploaded[name] || "");
       return Number.isNaN(time) ? -Infinity : time;
     };
-    return [...(names || [])].map((name, i) => ({ name, i, t: when(name) })).sort((a, b) => b.t - a.t || a.i - b.i).map((d) => d.name);
+    return [...(names || [])].filter((name) => !isTailoredCv(name)).map((name, i) => ({ name, i, t: when(name) }))
+      .sort((a, b) => b.t - a.t || a.i - b.i).map((d) => d.name);
   }
+
+  const TAILORED = /^(en|fr)_tailored_[A-Za-z0-9]+$/;
+  const isTailoredCv = (name) => TAILORED.test(String(name || ""));
+  // Package for a tailored CV: "<lang>_tailored_<Org>[n]_<date>" (the CV's own id means nothing to the student).
+  // n (2, 3...) goes after the shortened company name, so it is never cut off.
+  const tailoredPackageName = (docName, org, day, n = 1) =>
+    `${String(docName).slice(0, 2)}_tailored_${String(org || "").replace(/[^A-Za-z0-9]+/g, "").slice(0, 24) || "Job"}${n > 1 ? n : ""}_${day}`;
 
   // Best CV document for a suggestion like "en_fullstack": exact base first, then language + track words in the name.
   function pickCv(names, suggestion) {
+    names = (names || []).filter((n) => !isTailoredCv(n));
     if (!suggestion) return { name: names[0], exact: false };
     const exact = names.find((n) => n.startsWith(`${suggestion}_`) || n === suggestion);
     if (exact) return { name: exact, exact: true };
@@ -447,12 +458,12 @@
 
   // Bump when messages between the extension pages and bridge.js change. Unpacked extensions reload pages on every open
   // but keep the service worker running old code until the extension is reloaded; pages compare this number.
-  const BRIDGE_API = 6;
+  const BRIDGE_API = 7;
   // Letter text from a bridge reply (older hosts answered with "sentence").
   const letterText = (reply) => reply?.text ?? reply?.sentence ?? "";
 
   return {
     BRIDGE_API, letterText, FIELD_ALIASES, fieldForLabel, normalizeLabel, detectLanguage, recommendTrack, parseDocuments, parseMethod, isExternal, pickApplyUrl, parseDate, daysUntil,
-    parsePosting, isLikelyPosting, jobFileStem, mailtoFor, DEFAULT_PREFS, scorePosting, filterPosting, isSubmitted, provinceName, locationOf, workFormat, newestDocs, pickCv, trackerRow, trackerCsv, TRACKER_COLUMNS, slug
+    parsePosting, isLikelyPosting, jobFileStem, mailtoFor, DEFAULT_PREFS, scorePosting, filterPosting, isSubmitted, provinceName, locationOf, workFormat, newestDocs, pickCv, isTailoredCv, tailoredPackageName, trackerRow, trackerCsv, TRACKER_COLUMNS, slug
   };
 });

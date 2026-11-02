@@ -283,3 +283,8 @@ button.small { width: auto; margin: 0; padding: 4px 9px; font-size: 11px; }
 .write-all { width: 100%; margin-top: 6px; }
 .footer-links { margin: 14px 0 0; text-align: right; font-size: 11px; }
 .footer-links a { color: var(--muted); }
+
+/* Tailored CV (optional CV builder) */
+.tailor { display: grid; gap: 4px; margin: 2px 0 6px; padding: 6px 8px; border-left: 3px solid #d8dade; }
+.tailor-projects { display: grid; grid-template-columns: 1fr 1fr; gap: 0 8px; }
+.tailor-projects .check { grid-column: auto; margin: 0; font-size: 12px; font-weight: 500; }

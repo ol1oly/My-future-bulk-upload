@@ -13,6 +13,8 @@ Tools for McGill myFuture (Orbis): documents (upload / packages / cleanup) and j
 - `native/`: native messaging host `mst_bridge.py` (serves `~/.mst/plan.json`, PDFs it references, `scripts/*.js`;
   writes `~/.mst/out/`) + `install_host.ps1` (user runs it).
 - `native/letter_settings.py` / `letter_style.py`: shared cover-letter settings + sources digest, and the AI-tell checks.
+- Optional `jobs.cvBuilder` hook (`tailorCv`): an external command builds a per-posting CV; documents named
+  `<lang>_tailored_<id>` are never default CVs nor cleanup candidates. See `docs/job-applications.md`.
 - `apply/`: letter + plan scripts and the generic `myfuture-apply` skill (`apply/SKILL.md`). `SKILL.md` at the root is
   the documents skill.
 
