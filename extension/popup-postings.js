@@ -239,7 +239,7 @@
     build.addEventListener("click", () => go({ noReuse: state.tailored?.kind === "variant" }));
     rebuild.addEventListener("click", () => {
       const ids = checked();
-      if (ids.length < 2) { say("Pick at least 2 projects.", true); return; }
+      if (!ids.length) { say("Pick the projects first.", true); return; } // the builder checks how many are allowed
       go({ projects: ids, noReuse: true });
     });
     view.addEventListener("click", () => send({ type: "BRIDGE_VIEW_PATH", path: state.tailored.pdf }));
