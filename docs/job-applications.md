@@ -64,6 +64,9 @@ coverLetter{needed, template, slots{SALUTATION, ROLE, COMPANY, HOOK, FIT}} }`
   that, so the code assumes the list is complete: a posting missing from it counts as closed and is dropped
   (`dropClosed` in `extension/bridge.js`, on sync and on Apply / Open / shortlist). If a board ever nears 5,000
   postings, raise the cap or stop dropping postings when the cap is hit.
+- Apply / Open / shortlist look on the posting's recorded board first (default Internship / Co-op when none was
+  saved), then on the other board, read only on a miss. Found there: the board is corrected in storage. Dropped as
+  closed only when neither board lists it.
 
 ## Local bridge (2026-10-13)
 

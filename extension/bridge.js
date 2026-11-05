@@ -40,6 +40,17 @@ importScripts("lib/jobs.js");
     await updateApps((s) => { for (const id of ids) if (s[id] && !s[id].applied) delete s[id]; });
     return ids.length;
   }
+  // A posting saved without its board defaults to Internship / Co-op, so a lookup that misses tries the other board too.
+  const otherBoard = (board) => (board === "career" ? "internshipscoop" : "career");
+  // Records the board a posting was actually found on, so the next lookup goes straight there.
+  async function rememberBoard(id, board) {
+    id = String(id);
+    const data = await chrome.storage.local.get({ [BOARD_KEY]: {}, mstSuggested: {} });
+    if (data[BOARD_KEY][id]) data[BOARD_KEY][id].board = board;
+    if (data.mstSuggested[id]) data.mstSuggested[id].board = board;
+    await chrome.storage.local.set({ [BOARD_KEY]: data[BOARD_KEY], mstSuggested: data.mstSuggested });
+    await updateApps((s) => { if (s[id]) s[id].board = board; });
+  }
   const closedError = (id) => Object.assign(new Error(`Posting ${id} has closed on myFuture (no longer listed), so it was removed from My postings.`), { closed: true });
 
   async function loadApply() { return (await chrome.storage.local.get({ [APPLY_KEY]: {} }))[APPLY_KEY]; }
@@ -65,7 +76,7 @@ importScripts("lib/jobs.js");
         const id = String(app.postingId);
         if (hidden.includes(id) || (closed.includes(id) && !apps[id])) continue;
         apps[id] = { letter: app.letterPdf ? "todo" : "none", packageStatus: "todo", applied: false, ...(apps[id] || {}),
-          postingId: id, title: app.title || "", organization: app.organization || "", board: app.board || "internshipscoop",
+          postingId: id, title: app.title || "", organization: app.organization || "", board: app.board || apps[id]?.board || "internshipscoop",
           package: app.package, letterName: app.letterName || "", inPlan: true };
       }
     });
@@ -307,28 +318,47 @@ importScripts("lib/jobs.js");
 
   // Opens a NEW background tab on the posting's board and turns it into myFuture's own application form for that
   // posting (same request as the Apply button). Shows a banner naming the package to choose. Never submits.
-  async function openFormTab(app, { active = false } = {}) {
-    const tab = await chrome.tabs.create({ url: `https://myfuture.mcgill.ca${BOARDS[app.board || "internshipscoop"]}`, active });
-    await waitTab(tab.id);
-    const listLoaded = waitTab(tab.id);
-    const clicked = await inPage(tab.id, () => {
+  // Shows `board`'s "View all available postings" list in the tab (navigating there first when `navigate`), loads the
+  // board engine and reports whether posting `id` is listed.
+  async function boardListHas(tabId, board, id, navigate) {
+    if (navigate) {
+      const loaded = waitTab(tabId);
+      await chrome.tabs.update(tabId, { url: `https://myfuture.mcgill.ca${BOARDS[board]}` });
+      await loaded;
+    }
+    const listLoaded = waitTab(tabId);
+    const clicked = await inPage(tabId, () => {
       const button = [...document.querySelectorAll("a,button")].find((node) => node.innerText.trim() === "View all available postings");
       if (button) button.click();
       return Boolean(button);
     });
     if (!clicked) throw new Error("Not signed in to myFuture (postings page not found)");
     await listLoaded;
-    await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: "MAIN", files: ["lib/jobs.js", "orbis-board.js"] });
-    await setApplyTab(tab.id, { postingId: String(app.postingId), title: app.title || "", organization: app.organization || "", package: app.package || "" });
+    await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", files: ["lib/jobs.js", "orbis-board.js"] });
+    return inPage(tabId, async (pid) => (await __orbisBoard.listAll()).some((row) => row.id === String(pid)), [String(id)]);
+  }
+
+  // Opens a NEW tab on the board that lists the posting: its recorded board first, then the other one (the second list
+  // is read only on a miss). A posting on neither board has closed: it is dropped and the tab closed.
+  async function openOnBoard(item, active) {
+    const first = item.board || "internshipscoop";
+    const tab = await chrome.tabs.create({ url: `https://myfuture.mcgill.ca${BOARDS[first]}`, active });
+    await waitTab(tab.id);
+    if (await boardListHas(tab.id, first, item.postingId, false)) return tab;
+    const second = otherBoard(first);
+    if (await boardListHas(tab.id, second, item.postingId, true)) { await rememberBoard(item.postingId, second); return tab; }
+    await chrome.tabs.remove(tab.id);
+    await dropClosed([item.postingId]);
+    throw closedError(item.postingId);
+  }
+
+  async function openFormTab(app, { active = false } = {}) {
+    const tab = await openOnBoard(app, active);
+    const applyTab = { postingId: String(app.postingId), title: app.title || "", organization: app.organization || "", package: app.package || "" };
+    await setApplyTab(tab.id, applyTab);
     const formLoaded = waitTab(tab.id);
-    const found = await inPage(tab.id, async (id) => {
-      const rows = await __orbisBoard.listAll();
-      if (!rows.some((row) => row.id === String(id))) return false;
-      __orbisBoard.applyHere(String(id));
-      return true;
-    }, [app.postingId]);
-    if (!found) { await chrome.tabs.remove(tab.id); await dropClosed([app.postingId]); throw closedError(app.postingId); }
-    await setApplyTab(tab.id, { postingId: String(app.postingId), title: app.title || "", organization: app.organization || "", package: app.package || "" });
+    await inPage(tab.id, (id) => { __orbisBoard.applyHere(id); }, [String(app.postingId)]);
+    await setApplyTab(tab.id, applyTab);
     await formLoaded; // apply-helper.js (content script) shows the banner and pre-selects the package on every page
     return tab;
   }
@@ -473,7 +503,17 @@ importScripts("lib/jobs.js");
   }
 
   // One posting's row on its board (shortlisted? submitted?), read live in a hidden frame. Optionally toggles the shortlist.
+  // Recorded board first, then the other one (read only on a miss); null when neither lists the posting.
   async function boardRow(tabId, postingId, board, toggle) {
+    const first = board || "internshipscoop";
+    for (const b of [first, otherBoard(first)]) {
+      const row = await boardRowOn(tabId, postingId, b, toggle);
+      if (row) { if (b !== first) await rememberBoard(postingId, b); return row; }
+    }
+    return null;
+  }
+
+  async function boardRowOn(tabId, postingId, board, toggle) {
     await ensureFrameOps(tabId);
     const engine = [await ownFile("lib/jobs.js"), await ownFile("orbis-board.js")];
     const row = await inPage(tabId, async (path, sources, id, flip) => {
@@ -485,11 +525,11 @@ importScripts("lib/jobs.js");
       if (flip) { await w.__orbisBoard.toggleShortlist(String(id)); found.shortlisted = !found.shortlisted; }
       return { id: found.id, title: found.title, organization: found.organization, city: found.city, deadlineText: found.deadlineText,
         appStatus: found.appStatus, shortlisted: found.shortlisted, canApply: found.canApply };
-    }, [BOARDS[board || "internshipscoop"], engine, postingId, Boolean(toggle)]);
+    }, [BOARDS[board], engine, postingId, Boolean(toggle)]);
     if (!row) return null;
     // Update only this posting in the stored snapshot (no full sync).
     const { [BOARD_KEY]: snapshot = {} } = await chrome.storage.local.get({ [BOARD_KEY]: {} });
-    snapshot[postingId] = { ...(snapshot[postingId] || {}), ...row, board: board || "internshipscoop" };
+    snapshot[postingId] = { ...(snapshot[postingId] || {}), ...row, board };
     await chrome.storage.local.set({ [BOARD_KEY]: snapshot });
     chrome.runtime.sendMessage({ type: "BRIDGE_APPS" }).catch(() => {});
     return row;
@@ -509,24 +549,8 @@ importScripts("lib/jobs.js");
 
   // Opens the posting itself (myFuture's view page) in a new tab.
   async function openPostingTab(item) {
-    const tab = await chrome.tabs.create({ url: `https://myfuture.mcgill.ca${BOARDS[item.board || "internshipscoop"]}`, active: true });
-    await waitTab(tab.id);
-    const listLoaded = waitTab(tab.id);
-    const clicked = await inPage(tab.id, () => {
-      const button = [...document.querySelectorAll("a,button")].find((node) => node.innerText.trim() === "View all available postings");
-      if (button) button.click();
-      return Boolean(button);
-    });
-    if (!clicked) throw new Error("Not signed in to myFuture (postings page not found)");
-    await listLoaded;
-    await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: "MAIN", files: ["lib/jobs.js", "orbis-board.js"] });
-    const ok = await inPage(tab.id, async (id) => {
-      const rows = await __orbisBoard.listAll();
-      if (!rows.some((row) => row.id === String(id))) return false;
-      __orbisBoard.openHere(String(id));
-      return true;
-    }, [item.postingId]);
-    if (!ok) { await chrome.tabs.remove(tab.id); await dropClosed([item.postingId]); throw closedError(item.postingId); }
+    const tab = await openOnBoard(item, true);
+    await inPage(tab.id, (id) => { __orbisBoard.openHere(id); }, [String(item.postingId)]);
     return { message: "Opened the posting in a new tab." };
   }
 
@@ -719,7 +743,7 @@ importScripts("lib/jobs.js");
     if (!created?.ok) throw new Error(`The package could not be created (${created?.results?.[0]?.status || "unknown error"}).`);
     await updateApps((s) => {
       const id = String(item.postingId);
-      s[id] = { ...(s[id] || {}), postingId: id, title: item.title || "", organization: item.organization || "", board: item.board || "internshipscoop",
+      s[id] = { ...(s[id] || {}), postingId: id, title: item.title || "", organization: item.organization || "", board: item.board || s[id]?.board || "internshipscoop",
         package: packageName, packageStatus: "done", letterName, letter: letterName ? "done" : "none", cvUsed: cvName, transcriptUsed: choice.transcript || "",
         cvTailored: tailored ? { docName: cvName, projects: tailored.projects || [] } : null,
         applied: false, inPlan: true, source: "extension" };
