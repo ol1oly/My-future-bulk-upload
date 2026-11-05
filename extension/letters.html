@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Cover letters for all</title>
+    <title>Packages for all</title>
     <style>
       :root { --ink: #16181d; --muted: #68707d; --line: #e3e5e8; --red: #ed1b2f; --surface: #f6f7f8; }
       body { margin: 0; background: var(--surface); color: var(--ink); font: 14px/1.5 system-ui, "Segoe UI", sans-serif; }
@@ -30,18 +30,22 @@
       .state.ok { color: #14632b; }
       .issues { color: #7a5600; font-size: 12px; margin-top: 4px; }
       .tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+      label.skip { display: flex; gap: 6px; align-items: center; margin-top: 8px; cursor: pointer; }
       .tools input { flex: 1; min-width: 220px; padding: 6px 8px; border: 1px solid #cdd1d6; border-radius: 6px; font: inherit; }
     </style>
   </head>
   <body>
     <main>
-      <h1>Cover letters for all</h1>
-      <p class="note">Your active postings that don't have a package yet. <b>Write letters</b> asks Claude for each one
+      <h1>Packages for all</h1>
+      <p class="note">Your active postings that don't have a package yet: pick each one's CV (or a tailored CV) and transcript.
+        Cover letters are optional unless the posting asks for one. <b>Write letters</b> asks Claude for each one
         (about 15 s each) that has no draft yet; <b>Rewrite all</b> redrafts every selected one, following your <a href="#" id="settings">cover letter settings</a>. Edit or rewrite any of them,
         then <b>Make PDFs</b> (Word opens once per group) and look at them. <b>Upload &amp; build packages</b> uploads exactly
-        those PDFs and creates the packages. Nothing is submitted.</p>
+        those PDFs and CVs and creates one package per selected posting. Postings applied for outside myFuture (employer's
+        site, email) never get a package. Nothing is submitted.</p>
+      <label class="note skip"><input id="skipExternal" type="checkbox" checked /> Skip postings applied for outside myFuture <span id="skipped"></span></label>
       <div class="bar">
-        <button id="write" type="button">1. Write letters</button>
+        <button id="write" type="button">1. Write letters (optional)</button>
         <button id="writeAll" type="button" class="secondary">Rewrite all</button>
         <button id="make" type="button" class="secondary">2. Make PDFs</button>
         <button id="tailorAll" type="button" class="secondary" hidden title="Claude picks your most relevant projects for each posting and builds a one-page CV (or names your existing CV when it already fits)">Tailored CVs for all</button>

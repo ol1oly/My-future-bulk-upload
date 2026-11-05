@@ -96,8 +96,8 @@
     }
     const ready = n.ready;
     const needPackage = items.filter((i) => i.stage === "prepare").length;
-    writeAllBtn.hidden = !(lettersReady() && onMyFuture && needPackage);
-    writeAllBtn.textContent = `Write letters for all without a package (${needPackage})`;
+    writeAllBtn.hidden = !(onMyFuture && needPackage); // packages need no Claude: letters are optional there
+    writeAllBtn.textContent = `Packages for all without one (${needPackage})`;
     applyAllBtn.textContent = Date.now() < armedUntil ? `Click again to open ${ready} form(s)` : `Apply to all with a package (${ready})`;
     const shown = items.filter((i) => matches(i, filter));
     if (!shown.length) {

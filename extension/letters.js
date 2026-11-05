@@ -1,12 +1,16 @@
-// Mass cover letters: draft (Claude, one posting at a time) → review/edit → build packages (one at a time).
+// Packages for all: per posting a CV (chosen or tailored), a transcript and an optional cover letter (Claude drafts,
+// student reviews/edits, Word makes the PDF) → one myFuture package each. Postings applied for outside myFuture
+// (employer's site, email) never get a package; they can be hidden altogether.
 // Drafts and progress live in chrome.storage.local ("mstBatch"), so closing this tab and coming back resumes.
 (() => {
   "use strict";
   const $ = (sel) => document.querySelector(sel);
   const listEl = $("#list"), statusEl = $("#status"), writeBtn = $("#write"), writeAllBtn = $("#writeAll"), makeBtn = $("#make"), buildBtn = $("#build"), tailorAllBtn = $("#tailorAll");
+  const skipExternalBox = $("#skipExternal"), skippedEl = $("#skipped");
   const { letterText } = JobTools;
   const pdfCurrent = (b) => Boolean(b?.pdf && b.pdfText === b.text);
-  let myFutureTab = null, docs = null, postings = [], batch = {}, busy = false, cvBuilder = false;
+  let myFutureTab = null, docs = null, all = [], postings = [], batch = {}, busy = false, cvBuilder = false, lettersReady = false, skipExternal = true;
+  const SKIP_KEY = "mstBatchSkipExternal"; // hide postings applied for outside myFuture (default on)
   const TAILORED = "__tailored"; // CV choice: a CV built for this posting by the optional CV builder
 
   const el = (tag, props = {}, ...children) => {
@@ -34,12 +38,19 @@
     for (const a of Object.values(data.mstApps)) add(a.postingId, { board: a.board, title: a.title, organization: a.organization, packageStatus: a.packageStatus, applied: a.applied });
     // The last scan already knows each posting's recommended CV and required documents.
     for (const s of data.mfLastScan) if (byId.has(s.postingId)) add(s.postingId, { recommendedCv: s.cv, documents: s.documents });
-    postings = [...byId.values()].filter((p) => !data.mstHidden.includes(p.postingId) && p.packageStatus !== "done" && !p.applied
+    all = [...byId.values()].filter((p) => !data.mstHidden.includes(p.postingId) && p.packageStatus !== "done" && !p.applied
       && !JobTools.isSubmitted(data.mfBoard[p.postingId]?.appStatus));
     // Applied for on the employer's site or by email: letter and PDF only, never a myFuture package.
-    for (const p of postings) p.external = JobTools.isExternal(data.mstApply[p.postingId]?.method);
-    render();
+    for (const p of all) p.external = JobTools.isExternal(data.mstApply[p.postingId]?.method);
+    applySkip();
     recommendMissing();
+  }
+
+  function applySkip() {
+    postings = skipExternal ? all.filter((p) => !p.external) : all;
+    const hidden = all.length - postings.length;
+    skippedEl.textContent = hidden ? `(${hidden} hidden)` : "";
+    render();
   }
 
   const recommendedCv = (p) => batch[p.postingId]?.recommendedCv || p.recommendedCv || "";
@@ -60,15 +71,19 @@
 
   function render() {
     if (!postings.length) {
-      listEl.replaceChildren(el("p", { className: "note", textContent: "No active posting without a package. Shortlist postings or use Find matches first." }));
+      listEl.replaceChildren(el("p", { className: "note", textContent: all.length
+        ? "Every posting left is applied for outside myFuture. Untick \"Skip postings applied for outside myFuture\" to write their letters."
+        : "No active posting without a package. Shortlist postings or use Find matches first." }));
       return;
     }
     listEl.replaceChildren(...postings.map(card));
-    const open = (p) => batch[p.postingId] && batch[p.postingId].status !== "built" && batch[p.postingId].include !== false;
-    const active = postings.filter((p) => open(p) && batch[p.postingId].text);
+    const open = (p) => batch[p.postingId]?.status !== "built" && batch[p.postingId]?.include !== false;
+    const active = postings.filter((p) => open(p) && batch[p.postingId]?.text);
     makeBtn.textContent = `2. Make PDFs (${active.filter((p) => !pdfCurrent(batch[p.postingId])).length})`;
-    buildBtn.textContent = `3. Upload & build packages (${postings.filter((p) => open(p) && !p.external && (batch[p.postingId].text || batch[p.postingId].cv === TAILORED)).length})`;
+    buildBtn.textContent = `3. Upload & build packages (${postings.filter((p) => open(p) && !p.external).length})`;
   }
+
+  const needsLetter = (p) => Boolean(documentsOf(p)?.coverLetter);
 
   function card(p) {
     const b = batch[p.postingId] || {};
@@ -98,10 +113,13 @@
     const transcript = el("select", {}, el("option", { value: "", textContent: "No transcript" }), ...newest(docs?.transcripts).map((n) => el("option", { value: n, textContent: n })));
     transcript.value = b.transcript ?? defaultTranscript(p);
     transcript.addEventListener("change", () => { entry(p.postingId).transcript = transcript.value; saveBatch(); });
-    const text = el("textarea", { rows: b.style === "free" ? 12 : 6, value: b.text || "", placeholder: "Press Write letters above. Template letters: the opening sentence, a blank line, then the fit paragraph." });
+    const text = el("textarea", { rows: b.style === "free" ? 12 : 6, value: b.text || "", placeholder: needsLetter(p) || !documentsOf(p)
+      ? "Cover letter (optional unless the posting asks for one): press Write letters above. Template letters: the opening sentence, a blank line, then the fit paragraph."
+      : "No cover letter needed: leave empty to build the package with your CV (and transcript) only." });
     text.addEventListener("input", () => { entry(p.postingId).text = text.value; saveBatch(); viewBtn.hidden = !pdfCurrent(batch[p.postingId]); });
     const change = el("input", { type: "text", placeholder: "What to change (optional), e.g. shorter, mention my game projects" });
-    const rewrite = el("button", { type: "button", className: "secondary", textContent: b.text ? "Rewrite" : "Write", disabled: !myFutureTab || busy });
+    const rewrite = el("button", { type: "button", className: "secondary", textContent: b.text ? "Rewrite" : "Write", disabled: !myFutureTab || busy || !lettersReady,
+      title: lettersReady ? "" : "Claude letters need the local bridge and Claude Code (see cover letter settings)" });
     const viewBtn = el("button", { type: "button", className: "link", textContent: "View PDF", hidden: !pdfCurrent(b) });
     viewBtn.addEventListener("click", () => send({ type: "BRIDGE_VIEW_PATH", path: batch[p.postingId].pdf }));
     rewrite.addEventListener("click", async () => {
@@ -122,7 +140,8 @@
       : b.pdfError && !pdfCurrent(b) ? el("span", { className: "state bad", textContent: `PDF: ${b.pdfError}` })
       : b.status === "error" ? el("span", { className: "state bad", textContent: b.error })
       : p.external ? el("span", { className: "state", textContent: "Applied for on the employer's site: no myFuture package. Make the PDF, then upload it there (Apply in My postings opens their page)." })
-      : documentsOf(p) && !documentsOf(p).coverLetter ? el("span", { className: "state", textContent: "This posting doesn't ask for a cover letter (one is still allowed)." }) : null;
+      : documentsOf(p) && !needsLetter(p) ? el("span", { className: "state", textContent: "This posting doesn't ask for a cover letter (one is still allowed)." })
+      : needsLetter(p) && !b.text ? el("span", { className: "state", textContent: "This posting asks for a cover letter: write one before building its package." }) : null;
     return el("div", { className: `card${b.status === "built" ? " done" : ""}` },
       el("div", { className: "head" }, include,
         el("div", {}, el("strong", { textContent: `${p.organization || "Posting"}: ${p.title || p.postingId}` }),
@@ -168,7 +187,8 @@
   }
 
   async function tailorAll() {
-    const targets = postings.filter((p) => !p.external && batch[p.postingId]?.include !== false && batch[p.postingId]?.status !== "built");
+    // Shown external postings too: their tailored CV is uploaded by hand on the employer's site.
+    const targets = postings.filter((p) => batch[p.postingId]?.include !== false && batch[p.postingId]?.status !== "built");
     if (!targets.length) { say("No selected posting left."); return; }
     lock(true);
     try {
@@ -208,7 +228,8 @@
 
   function lock(on) {
     busy = on;
-    writeBtn.disabled = writeAllBtn.disabled = makeBtn.disabled = buildBtn.disabled = tailorAllBtn.disabled = on || !myFutureTab;
+    buildBtn.disabled = tailorAllBtn.disabled = skipExternalBox.disabled = on || !myFutureTab;
+    writeBtn.disabled = writeAllBtn.disabled = makeBtn.disabled = on || !myFutureTab || !lettersReady;
     render();
   }
 
@@ -230,13 +251,21 @@
   }
 
   async function buildAll() {
-    // A posting with a letter draft, or one set to a tailored CV (some postings ask for a CV only).
-    const targets = postings.filter((p) => !p.external && (batch[p.postingId]?.text || batch[p.postingId]?.cv === TAILORED) && batch[p.postingId].include !== false && batch[p.postingId].status !== "built");
-    if (!targets.length) { say(postings.some((p) => p.external) ? "Nothing to build: external postings get a PDF only (Make PDFs), no package." : "Nothing to build: write letters first."); return; }
+    // Every selected posting applied for on myFuture: CV + transcript, plus the letter when one is drafted.
+    const targets = postings.filter((p) => !p.external && batch[p.postingId]?.include !== false && batch[p.postingId]?.status !== "built");
+    if (!targets.length) { say(postings.some((p) => p.external) ? "Nothing to build: postings applied for outside myFuture get a PDF only (Make PDFs), no package." : "No selected posting left to build."); return; }
     lock(true);
+    let skipped = 0;
     try {
       for (const [i, p] of targets.entries()) {
-        const b = batch[p.postingId];
+        const b = entry(p.postingId);
+        if (needsLetter(p) && !b.text) {
+          Object.assign(b, { status: "error", error: "Needs a cover letter: write one, or untick this posting." });
+          skipped += 1;
+          await saveBatch();
+          render();
+          continue;
+        }
         const transcript = b.transcript ?? defaultTranscript(p);
         say(`Preparing ${i + 1} of ${targets.length}: ${p.organization}${b.cv === TAILORED && !b.tailored ? " (building the CV first)" : ""}…`);
         const cvPart = await cvChoice(p);
@@ -249,7 +278,7 @@
         render();
         if (!reply?.ok && /signed in|logged out|login/i.test(reply?.error || "")) { say("myFuture signed you out. Sign in again, then press Build packages to continue.", true); return; }
       }
-      say("Done. Apply from My postings (Apply to all with a package).");
+      say(`Done${skipped ? `; ${skipped} skipped (they need a cover letter)` : ""}. Apply from My postings (Apply to all with a package).`, Boolean(skipped));
     } finally { lock(false); }
   }
 
@@ -257,7 +286,13 @@
     $("#settings").addEventListener("click", (e) => { e.preventDefault(); chrome.runtime.openOptionsPage(); });
     [myFutureTab] = await chrome.tabs.query({ url: "https://myfuture.mcgill.ca/*" });
     if (!myFutureTab) say("Open myFuture in another tab (signed in) and reload this page.", true);
-    lock(false);
+    skipExternal = (await chrome.storage.local.get({ [SKIP_KEY]: true }))[SKIP_KEY] !== false;
+    skipExternalBox.checked = skipExternal;
+    skipExternalBox.addEventListener("change", () => {
+      skipExternal = skipExternalBox.checked;
+      chrome.storage.local.set({ [SKIP_KEY]: skipExternal });
+      applySkip();
+    });
     writeBtn.addEventListener("click", () => writeAll());
     writeAllBtn.addEventListener("click", () => writeAll(true));
     makeBtn.addEventListener("click", makeAll);
@@ -265,8 +300,11 @@
     tailorAllBtn.addEventListener("click", tailorAll);
     const status = await chrome.runtime.sendMessage({ type: "BRIDGE_STATUS" });
     cvBuilder = Boolean(status?.cvBuilder);
+    lettersReady = Boolean(status?.letters && Object.values(status.letters).every(Boolean));
     tailorAllBtn.hidden = !cvBuilder;
+    lock(false);
     if (status && status.api !== JobTools.BRIDGE_API) say("The extension's background part is out of date. Open chrome://extensions and press the reload icon on myFuture Toolkit, then reopen this.", true);
+    else if (myFutureTab && !lettersReady) say("Claude letters aren't set up on this computer (see cover letter settings): packages here use your CV and transcript only.");
     await load();
   }
 
