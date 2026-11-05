@@ -252,6 +252,9 @@ button.small { width: auto; margin: 0; padding: 4px 9px; font-size: 11px; }
 .row-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
 .row-actions button { width: auto; margin: 0; padding: 4px 9px; font-size: 11px; }
 .row-actions button.primary { background: var(--red); color: #fff; }
+/* Apply outside myFuture (employer site / email): blue like the External chip, so it never reads as the McGill Apply. */
+.row-actions button.primary.external { background: #1f6fbf; border-color: #1f6fbf; }
+.row-actions button.primary.external:hover:not(:disabled) { background: #1b5fa3; border-color: #1b5fa3; }
 .row-actions button.icon { padding: 3px 8px; font-size: 13px; line-height: 1; }
 .row-actions button.link { padding: 4px 4px; }
 .app-row { display: block; }

@@ -120,7 +120,7 @@
     };
     if (item.external && item.stage !== "submitted") {
       // Applied for outside myFuture: no package; Apply opens the employer's page (or the posting, which names it).
-      act(item.method === "email" ? "Apply by email" : "Apply on their site ↗", "primary", (b) => run(b, { type: "BRIDGE_OPEN_FORMS", items: [ref] }, "Opening…"),
+      act(item.method === "email" ? "Apply by email" : "Apply on their site ↗", "primary external", (b) => run(b, { type: "BRIDGE_OPEN_FORMS", items: [ref] }, "Opening…"),
         item.method === "email" ? "Opens the posting with the address to email; no myFuture package needed" : "Opens the employer's application page; no myFuture package needed");
       act(openPrepare === item.postingId ? "Close" : "Letter…", "secondary",
         () => { setOpenPrepare(openPrepare === item.postingId ? "" : item.postingId); render(); },
