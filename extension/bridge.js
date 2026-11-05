@@ -21,6 +21,26 @@ importScripts("lib/jobs.js");
   const HIDDEN_KEY = "mstHidden"; // posting ids the student removed from "My postings"
   const REQUESTS_KEY = "mstRequests"; // postings the student asked Claude to prepare
   const APPLY_KEY = "mstApply"; // postingId -> { method, urls, emails }: how to apply (myFuture, employer's website, email)
+  const CLOSED_KEY = "mstClosed"; // posting ids no longer listed on myFuture (closed): dropped from "My postings" for good
+
+  // A posting that has left myFuture's boards (deadline passed, withdrawn) can't be applied to: drop it from every
+  // source of "My postings". Submitted applications stay, as a record.
+  async function dropClosed(ids) {
+    ids = [...new Set(ids.map(String))];
+    if (!ids.length) return 0;
+    const data = await chrome.storage.local.get({ [CLOSED_KEY]: [], [BOARD_KEY]: {}, mstSuggested: {}, jobTracker: {} });
+    const closed = new Set(data[CLOSED_KEY]);
+    for (const id of ids) {
+      closed.add(id);
+      delete data[BOARD_KEY][id];
+      delete data.mstSuggested[id];
+      delete data.jobTracker[`p${id}`];
+    }
+    await chrome.storage.local.set({ [CLOSED_KEY]: [...closed], [BOARD_KEY]: data[BOARD_KEY], mstSuggested: data.mstSuggested, jobTracker: data.jobTracker });
+    await updateApps((s) => { for (const id of ids) if (s[id] && !s[id].applied) delete s[id]; });
+    return ids.length;
+  }
+  const closedError = (id) => Object.assign(new Error(`Posting ${id} has closed on myFuture (no longer listed), so it was removed from My postings.`), { closed: true });
 
   async function loadApply() { return (await chrome.storage.local.get({ [APPLY_KEY]: {} }))[APPLY_KEY]; }
   async function saveApply(entries) {
@@ -39,11 +59,11 @@ importScripts("lib/jobs.js");
   }
   // Keep the store in step with plan.json: add new applications, keep progress of known ones.
   async function seedApps(plan) {
-    const { [HIDDEN_KEY]: hidden = [] } = await chrome.storage.local.get({ [HIDDEN_KEY]: [] });
+    const { [HIDDEN_KEY]: hidden = [], [CLOSED_KEY]: closed = [] } = await chrome.storage.local.get({ [HIDDEN_KEY]: [], [CLOSED_KEY]: [] });
     return updateApps((apps) => {
       for (const app of plan?.applications || []) {
         const id = String(app.postingId);
-        if (hidden.includes(id)) continue;
+        if (hidden.includes(id) || (closed.includes(id) && !apps[id])) continue;
         apps[id] = { letter: app.letterPdf ? "todo" : "none", packageStatus: "todo", applied: false, ...(apps[id] || {}),
           postingId: id, title: app.title || "", organization: app.organization || "", board: app.board || "internshipscoop",
           package: app.package, letterName: app.letterName || "", inPlan: true };
@@ -307,7 +327,7 @@ importScripts("lib/jobs.js");
       __orbisBoard.applyHere(String(id));
       return true;
     }, [app.postingId]);
-    if (!found) { await chrome.tabs.remove(tab.id); throw new Error(`posting ${app.postingId} is no longer listed`); }
+    if (!found) { await chrome.tabs.remove(tab.id); await dropClosed([app.postingId]); throw closedError(app.postingId); }
     await setApplyTab(tab.id, { postingId: String(app.postingId), title: app.title || "", organization: app.organization || "", package: app.package || "" });
     await formLoaded; // apply-helper.js (content script) shows the banner and pre-selects the package on every page
     return tab;
@@ -339,7 +359,7 @@ importScripts("lib/jobs.js");
       : (postingIds?.length ? postingIds : Object.keys(store)).map(String).map((id) => store[id]).filter((app) => app && !app.applied && app.packageStatus === "done");
     if (!targets.length) throw new Error("No prepared application is waiting (run Prepare first).");
     const applyInfo = await loadApply();
-    const opened = [], failed = [], external = [];
+    const opened = [], failed = [], external = [], closed = [];
     for (const [index, app] of targets.entries()) {
       const apply = applyInfo[String(app.postingId)];
       if (JobTools.isExternal(apply?.method)) {
@@ -352,13 +372,17 @@ importScripts("lib/jobs.js");
         opened.push(app.postingId);
         await updateApps((s) => { if (s[app.postingId]) { s[app.postingId].formOpenedAt = new Date().toISOString(); s[app.postingId].formTabId = tab.id; } });
       } catch (error) {
+        if (error.closed) { closed.push(app.organization || app.postingId); continue; }
         failed.push({ postingId: app.postingId, error: error.message || String(error) });
         await updateApps((s) => { if (s[app.postingId]) s[app.postingId].error = error.message || String(error); });
       }
     }
-    const message = failed.length && !opened.length && !external.length ? `Could not open the form: ${failed[0].error}`
-      : [opened.length ? `Opened ${opened.length} application form(s)${failed.length ? `, ${failed.length} failed` : ""}. In each tab, choose your documents (or the named package) and submit; then press Sync.` : "",
-        ...external].filter(Boolean).join(" ");
+    const message = [
+      failed.length && !opened.length && !external.length ? `Could not open the form: ${failed[0].error}`
+        : opened.length ? `Opened ${opened.length} application form(s)${failed.length ? `, ${failed.length} failed` : ""}. In each tab, choose your documents (or the named package) and submit; then press Sync.` : "",
+      ...external,
+      closed.length ? `${closed.length} posting(s) have closed on myFuture and were removed from My postings: ${closed.join(", ")}.` : ""
+    ].filter(Boolean).join(" ");
     note(tabId, message);
     return { message, opened, failed };
   }
@@ -381,11 +405,13 @@ importScripts("lib/jobs.js");
     await ensureFrameOps(tabId);
     const engine = [await ownFile("lib/jobs.js"), await ownFile("orbis-board.js")];
     const snapshot = {}, counts = {};
+    let emptyBoard = false;
     const known = await loadApply(), apps = await loadApps(), { mstSuggested = {} } = await chrome.storage.local.get({ mstSuggested: {} });
     for (const board of Object.keys(BOARDS)) {
       note(tabId, `Reading ${board === "career" ? "General Jobs" : "Internship / Co-op"} postings…`);
       counts[board] = await inPage(tabId, (path) => window.__mfFrame.boardCounts(path), [BOARDS[board]]);
       const rows = await loadBoardIntoFrame(tabId, board, engine);
+      if (!rows.length) emptyBoard = true;
       for (const row of rows) snapshot[row.id] = { ...row, board };
       // How to apply (myFuture / website / email), read once per posting shown in My postings.
       const missing = rows.filter((r) => (r.shortlisted || apps[r.id] || mstSuggested[r.id]) && !known[r.id]).map((r) => r.id);
@@ -413,12 +439,23 @@ importScripts("lib/jobs.js");
     await chrome.storage.local.set({ mfDocs: { cvs: cvDocs.map((d) => d.name), transcripts: transcriptDocs.map((d) => d.name),
       coverLetters: letterDocs.map((d) => d.name), packages: packageDocs.map((d) => d.name),
       uploaded: Object.fromEntries([...cvDocs, ...transcriptDocs, ...letterDocs].map((d) => [d.name, d.date || ""])) } });
+    // Postings in My postings that are on neither board any more have closed: drop them (submitted ones stay).
+    const { jobTracker = {} } = await chrome.storage.local.get({ jobTracker: {} });
+    const trackedIds = Object.values(jobTracker).map((card) => String(card.postingId || (String(card.id || "").match(/^p(\d+)$/) || [])[1] || "")).filter(Boolean);
+    const isSubmitted = (app) => Boolean(app?.applied || app?.appliedExternally) || SUBMITTED.test(app?.appStatus || "");
+    // A board that read back empty is more likely a hiccup than every posting closing: then remove nothing.
+    const gone = emptyBoard ? [] : [...Object.keys(mstSuggested), ...trackedIds, ...Object.keys(apps)]
+      .filter((id) => !snapshot[id] && !isSubmitted(apps[id]));
+    const { [CLOSED_KEY]: closedBefore = [] } = await chrome.storage.local.get({ [CLOSED_KEY]: [] });
+    await chrome.storage.local.set({ [CLOSED_KEY]: closedBefore.filter((id) => !snapshot[id]) }); // listed again: not closed
+    const closedCount = await dropClosed(gone);
     let submitted = 0, started = 0, ready = 0;
     await updateApps((s) => {
       for (const app of Object.values(s)) {
         const row = snapshot[app.postingId];
         app.listed = Boolean(row);
-        app.appStatus = row?.appStatus || "";
+        if (!row) { if (app.applied) submitted += 1; continue; } // closed after it was submitted: keep its last status
+        app.appStatus = row.appStatus || "";
         app.applied = Boolean(app.appliedExternally) || SUBMITTED.test(app.appStatus);
         app.started = Boolean(app.appStatus) && !app.applied;
         if (app.letterName && letterDocs.some((d) => d.name === app.letterName)) app.letter = "done";
@@ -430,7 +467,7 @@ importScripts("lib/jobs.js");
     const shortlisted = Object.values(snapshot).filter((r) => r.shortlisted).length;
     const totalShortlist = Object.values(counts).reduce((sum, c) => sum + (c?.shortlist || 0), 0);
     const closed = Math.max(0, totalShortlist - shortlisted);
-    const message = `Synced: ${shortlisted} open shortlisted posting(s)${closed ? ` (${closed} more on your myFuture shortlist are closed)` : ""}, ${submitted} submitted, ${ready} ready to apply.`;
+    const message = `Synced: ${shortlisted} open shortlisted posting(s)${closed ? ` (${closed} more on your myFuture shortlist are closed)` : ""}, ${submitted} submitted, ${ready} ready to apply.${closedCount ? ` Removed ${closedCount} closed posting(s).` : ""}`;
     note(tabId, message);
     return { message };
   }
@@ -460,7 +497,7 @@ importScripts("lib/jobs.js");
 
   async function toggleShortlistJob(tabId, postingId, board) {
     const row = await boardRow(tabId, postingId, board, true);
-    if (!row) throw new Error("This posting is no longer listed on myFuture.");
+    if (!row) { await dropClosed([postingId]); throw closedError(postingId); }
     return { message: row.shortlisted ? "Added to your myFuture shortlist." : "Removed from your myFuture shortlist.", shortlisted: row.shortlisted };
   }
 
@@ -489,7 +526,7 @@ importScripts("lib/jobs.js");
       __orbisBoard.openHere(String(id));
       return true;
     }, [item.postingId]);
-    if (!ok) throw new Error("This posting is no longer listed on myFuture.");
+    if (!ok) { await chrome.tabs.remove(tab.id); await dropClosed([item.postingId]); throw closedError(item.postingId); }
     return { message: "Opened the posting in a new tab." };
   }
 
