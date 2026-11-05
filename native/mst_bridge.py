@@ -574,7 +574,8 @@ def handle(msg):
     if cmd == "ping":
         return {"ok": True, "home": str(HOME), "letters": letter_support(), "cvBuilder": bool(cv_builder()), "api": API_VERSION}
     if cmd == "tailorCv":
-        return {"ok": True, **tailor_cv(msg.get("posting") or {}, msg.get("projects"), msg.get("lang"), bool(msg.get("noReuse")))}
+        posting = msg.get("posting") or {}
+        return {"ok": True, **tailor_cv(posting, msg.get("projects"), msg.get("lang") or posting.get("lang"), bool(msg.get("noReuse")))}
     if cmd == "cvSettings":  # the builder's own settings form: {settings, fields[{key, type, label, ...}], path}
         if not cv_builder():
             return {"ok": True, "available": False}

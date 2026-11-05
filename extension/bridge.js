@@ -736,7 +736,7 @@ importScripts("lib/jobs.js");
     const d = await postingDetails(tabId, item);
     note(tabId, opts.projects?.length ? "Building your CV with the projects you picked…" : "Choosing the projects that fit this posting…");
     const r = await host({ cmd: "tailorCv", posting: { title: d.title || item.title, organization: d.organization || item.organization,
-      description: d.description, qualifications: d.qualifications, lang: d.language }, projects: opts.projects || null, noReuse: Boolean(opts.noReuse) });
+      description: d.description, qualifications: d.qualifications, lang: d.language }, lang: d.language, projects: opts.projects || null, noReuse: Boolean(opts.noReuse) });
     const tailored = { kind: r.kind, variant: r.variant || "", docName: r.docName || "", pdf: r.pdf, lang: r.lang, projects: r.projects || [],
       ranked: r.ranked || [], why: r.why || {}, skills: r.skills || {}, source: r.source || "", warnings: r.warnings || [], builtAt: new Date().toISOString() };
     note(tabId, r.kind === "variant" ? `Your existing CV ${r.variant} already fits this posting.` : `Tailored CV ready: ${tailored.projects.join(", ")}.`);
