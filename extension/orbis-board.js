@@ -89,6 +89,8 @@
     const tok = tokensFrom(globalThis.loadPostingTable, ["action", "initialSearchAction"]);
     const all = [];
     const seen = new Set();
+    // 50 pages x 100 rows = 5,000 postings: a loop guard, far above any board (~340). Callers treat the result as the
+    // complete list (missing = closed, see dropClosed in bridge.js); see docs/job-applications.md.
     for (let page = 1; page <= 50; page += 1) {
       const body = new URLSearchParams({
         action: tok.action, orderBy: "", oldOrderBy: "ID", sortDirection: "Reverse", keyword: "", searchBy: "advanced",

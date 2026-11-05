@@ -60,6 +60,10 @@ coverLetter{needed, template, slots{SALUTATION, ROLE, COMPANY, HOOK, FIT}} }`
 - Shortlist and Not interested are POSTs of `{action, postingId}` (tokens read from the page's own
   `saveFavoritePosting` / `toggleBlacklistPosting`). Tokens never leave the page.
 - Snapshot (Internship/Co-op, 338 postings): 183 apply through McGill, 154 external; 64 hidden by default exclude words.
+- `listAll` stops at 50 pages (5,000 postings at 100 per page) as a guard against an endless loop. Boards are far below
+  that, so the code assumes the list is complete: a posting missing from it counts as closed and is dropped
+  (`dropClosed` in `extension/bridge.js`, on sync and on Apply / Open / shortlist). If a board ever nears 5,000
+  postings, raise the cap or stop dropping postings when the cap is hit.
 
 ## Local bridge (2026-10-13)
 
